@@ -8,8 +8,13 @@ Comprehensive inspection of downloaded TFRecord files:
 - Overall dataset statistics
 
 Usage:
+    # Full inspection
     python -m vlaft.data.inspect_robovqa --data-dir /data/robovqa/raw
     python -m vlaft.data.inspect_robovqa --data-dir /data/robovqa/raw --max-samples 1000
+
+    # Sample mode: dump N random complete records
+    python -m vlaft.data.inspect_robovqa --data-dir /data/robovqa/raw --sample 12
+    python -m vlaft.data.inspect_robovqa --data-dir /data/robovqa/raw --sample 12 --seed 123
 """
 
 import argparse
@@ -17,6 +22,7 @@ import glob
 import json
 import logging
 import os
+import random
 import sys
 import time
 from collections import defaultdict
@@ -165,6 +171,206 @@ def parse_sequence_example(raw_record: bytes) -> Dict[str, Any]:
                             pass
 
     return result
+
+
+def dump_full_record(raw_record: bytes) -> Dict[str, Any]:
+    """
+    Extract all content from a single TFRecord for detailed inspection.
+
+    Returns dict with all context and sequence features fully decoded.
+    """
+    example = tf.train.SequenceExample()
+    example.ParseFromString(raw_record)
+
+    record = {
+        "context": {},
+        "sequences": {},
+    }
+
+    # Parse all context features
+    for key, feature in example.context.feature.items():
+        if feature.bytes_list.value:
+            try:
+                value = feature.bytes_list.value[0].decode("utf-8")
+                record["context"][key] = value
+            except UnicodeDecodeError:
+                record["context"][key] = f"<binary: {len(feature.bytes_list.value[0])} bytes>"
+        elif feature.int64_list.value:
+            record["context"][key] = list(feature.int64_list.value)
+        elif feature.float_list.value:
+            record["context"][key] = list(feature.float_list.value)
+
+    # Parse all sequence features
+    for key, feature_list in example.feature_lists.feature_list.items():
+        num_items = len(feature_list.feature)
+
+        if key.lower() in ["images", "image", "frames", "frame", "video"]:
+            # For images, just report count and sizes
+            sizes = []
+            for feature in feature_list.feature:
+                if feature.bytes_list.value:
+                    sizes.append(len(feature.bytes_list.value[0]))
+            record["sequences"][key] = {
+                "type": "images",
+                "count": num_items,
+                "byte_sizes": sizes[:5] if len(sizes) > 5 else sizes,
+                "note": f"... and {len(sizes) - 5} more" if len(sizes) > 5 else None,
+            }
+        else:
+            # For text and other sequences, extract all values
+            values = []
+            for feature in feature_list.feature:
+                if feature.bytes_list.value:
+                    try:
+                        values.append(feature.bytes_list.value[0].decode("utf-8"))
+                    except UnicodeDecodeError:
+                        values.append(f"<binary: {len(feature.bytes_list.value[0])} bytes>")
+                elif feature.int64_list.value:
+                    values.append(list(feature.int64_list.value))
+                elif feature.float_list.value:
+                    values.append(list(feature.float_list.value))
+
+            record["sequences"][key] = {
+                "type": "sequence",
+                "count": num_items,
+                "values": values,
+            }
+
+    return record
+
+
+def sample_records(
+    data_dir: Path,
+    num_samples: int = 12,
+    seed: int = 42,
+) -> List[Dict[str, Any]]:
+    """
+    Randomly sample records from across the dataset.
+
+    Args:
+        data_dir: Directory containing TFRecord files
+        num_samples: Number of records to sample
+        seed: Random seed for reproducibility
+
+    Returns:
+        List of fully dumped records
+    """
+    random.seed(seed)
+
+    tfrecord_files = find_tfrecord_files(data_dir)
+    if not tfrecord_files:
+        logging.error("No TFRecord files found")
+        return []
+
+    logging.info(f"Found {len(tfrecord_files)} TFRecord files")
+
+    # First pass: count records per file to enable random sampling
+    logging.info("Counting records per file...")
+    file_record_counts = []
+    total_records = 0
+
+    for filepath in tfrecord_files:
+        try:
+            dataset = tf.data.TFRecordDataset(str(filepath))
+            count = sum(1 for _ in dataset)
+            file_record_counts.append((filepath, count, total_records))
+            total_records += count
+        except Exception as e:
+            logging.warning(f"Error reading {filepath}: {e}")
+
+    logging.info(f"Total records: {total_records}")
+
+    # Generate random indices
+    if num_samples >= total_records:
+        sample_indices = list(range(total_records))
+    else:
+        sample_indices = sorted(random.sample(range(total_records), num_samples))
+
+    logging.info(f"Sampling {len(sample_indices)} records...")
+
+    # Map indices to files and fetch records
+    sampled_records = []
+    current_idx = 0
+
+    for filepath, count, start_idx in file_record_counts:
+        end_idx = start_idx + count
+
+        # Find which sample indices fall in this file
+        indices_in_file = [
+            idx - start_idx
+            for idx in sample_indices
+            if start_idx <= idx < end_idx
+        ]
+
+        if not indices_in_file:
+            continue
+
+        # Read the specific records from this file
+        try:
+            dataset = tf.data.TFRecordDataset(str(filepath))
+            for local_idx, raw_record in enumerate(dataset):
+                if local_idx in indices_in_file:
+                    record = dump_full_record(raw_record.numpy())
+                    record["_meta"] = {
+                        "global_index": start_idx + local_idx,
+                        "file": filepath.name,
+                        "local_index": local_idx,
+                    }
+                    sampled_records.append(record)
+
+                    if len(sampled_records) >= num_samples:
+                        break
+
+        except Exception as e:
+            logging.warning(f"Error sampling from {filepath}: {e}")
+
+        if len(sampled_records) >= num_samples:
+            break
+
+    return sampled_records
+
+
+def print_sampled_records(records: List[Dict[str, Any]]) -> None:
+    """Print sampled records in a human-readable format."""
+    for i, record in enumerate(records):
+        logging.info("")
+        logging.info("=" * 70)
+        logging.info(f"RECORD {i + 1}/{len(records)}")
+        logging.info("=" * 70)
+
+        meta = record.get("_meta", {})
+        logging.info(f"  File: {meta.get('file', 'unknown')}")
+        logging.info(f"  Global index: {meta.get('global_index', 'unknown')}")
+
+        logging.info("")
+        logging.info("  CONTEXT FEATURES:")
+        logging.info("  " + "-" * 38)
+        for key, value in record.get("context", {}).items():
+            logging.info(f"    {key}: {value}")
+
+        logging.info("")
+        logging.info("  SEQUENCE FEATURES:")
+        logging.info("  " + "-" * 38)
+        for key, seq_data in record.get("sequences", {}).items():
+            seq_type = seq_data.get("type", "unknown")
+            count = seq_data.get("count", 0)
+
+            if seq_type == "images":
+                sizes = seq_data.get("byte_sizes", [])
+                logging.info(f"    {key}: [{count} images]")
+                logging.info(f"      Sample sizes (bytes): {sizes}")
+            else:
+                values = seq_data.get("values", [])
+                logging.info(f"    {key}: [{count} items]")
+                for j, v in enumerate(values):
+                    if isinstance(v, str):
+                        preview = v[:200] + "..." if len(v) > 200 else v
+                        logging.info(f"      [{j}]: {preview}")
+                    else:
+                        logging.info(f"      [{j}]: {v}")
+
+    logging.info("")
+    logging.info("=" * 70)
 
 
 def analyze_sample(raw_record: bytes, sample_idx: int) -> Optional[Dict[str, Any]]:
@@ -486,7 +692,7 @@ def main():
         "--max-samples",
         type=int,
         default=None,
-        help="Maximum samples to analyze (default: all)",
+        help="Maximum samples to analyze for statistics (default: all)",
     )
     parser.add_argument(
         "--max-files",
@@ -500,6 +706,18 @@ def main():
         default=None,
         help="Output JSON file for full report (default: {data-dir}/inspection_report.json)",
     )
+    parser.add_argument(
+        "--sample",
+        type=int,
+        default=None,
+        help="Sample mode: randomly dump N complete records with all fields",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for sampling (default: 42)",
+    )
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir)
@@ -509,6 +727,26 @@ def main():
 
     setup_logging(data_dir)
 
+    # Sample mode: just dump N random records
+    if args.sample:
+        logging.info(f"Sample mode: dumping {args.sample} random records")
+        logging.info(f"Random seed: {args.seed}")
+
+        start_time = time.time()
+        records = sample_records(data_dir, num_samples=args.sample, seed=args.seed)
+        elapsed = time.time() - start_time
+
+        print_sampled_records(records)
+
+        # Save to JSON
+        output_path = args.output or str(data_dir / "sampled_records.json")
+        with open(output_path, "w") as f:
+            json.dump(records, f, indent=2, default=str)
+        logging.info(f"Sampled records saved to: {output_path}")
+        logging.info(f"Sampling completed in {elapsed:.1f} seconds")
+        return
+
+    # Full inspection mode
     logging.info(f"Inspecting RoboVQA dataset at: {data_dir}")
     if args.max_samples:
         logging.info(f"Limiting analysis to {args.max_samples} samples")
