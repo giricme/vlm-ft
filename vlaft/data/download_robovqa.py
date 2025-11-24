@@ -9,13 +9,13 @@ Usage:
 """
 
 import argparse
-import logging
-import sys
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+import logging
 from pathlib import Path
+import sys
 from threading import Lock
+import time
 from typing import List, Tuple
 
 from google.cloud import storage
@@ -125,8 +125,14 @@ class ProgressTracker:
     def log_progress(self):
         with self.lock:
             elapsed = time.time() - self.start_time
-            throughput = self.downloaded_bytes / elapsed / (1024 * 1024) if elapsed > 0 else 0
-            pct = (self.completed_files / self.total_files) * 100 if self.total_files > 0 else 0
+            throughput = (
+                self.downloaded_bytes / elapsed / (1024 * 1024) if elapsed > 0 else 0
+            )
+            pct = (
+                (self.completed_files / self.total_files) * 100
+                if self.total_files > 0
+                else 0
+            )
 
             logging.info(
                 f"Progress: {self.completed_files}/{self.total_files} files ({pct:.1f}%) | "
@@ -142,7 +148,9 @@ class ProgressTracker:
         logging.info("Download Summary")
         logging.info("=" * 60)
         logging.info(f"Total files: {self.total_files}")
-        logging.info(f"Downloaded: {self.completed_files - self.skipped_files - self.failed_files}")
+        logging.info(
+            f"Downloaded: {self.completed_files - self.skipped_files - self.failed_files}"
+        )
         logging.info(f"Skipped (already exist): {self.skipped_files}")
         logging.info(f"Failed: {self.failed_files}")
         logging.info(f"Total downloaded: {self.downloaded_bytes / (1024**3):.2f} GB")

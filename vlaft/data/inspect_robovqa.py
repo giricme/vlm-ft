@@ -18,16 +18,16 @@ Usage:
 """
 
 import argparse
+from collections import defaultdict
+from datetime import datetime
 import glob
 import json
 import logging
 import os
+from pathlib import Path
 import random
 import sys
 import time
-from collections import defaultdict
-from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -194,7 +194,9 @@ def dump_full_record(raw_record: bytes) -> Dict[str, Any]:
                 value = feature.bytes_list.value[0].decode("utf-8")
                 record["context"][key] = value
             except UnicodeDecodeError:
-                record["context"][key] = f"<binary: {len(feature.bytes_list.value[0])} bytes>"
+                record["context"][
+                    key
+                ] = f"<binary: {len(feature.bytes_list.value[0])} bytes>"
         elif feature.int64_list.value:
             record["context"][key] = list(feature.int64_list.value)
         elif feature.float_list.value:
@@ -224,7 +226,9 @@ def dump_full_record(raw_record: bytes) -> Dict[str, Any]:
                     try:
                         values.append(feature.bytes_list.value[0].decode("utf-8"))
                     except UnicodeDecodeError:
-                        values.append(f"<binary: {len(feature.bytes_list.value[0])} bytes>")
+                        values.append(
+                            f"<binary: {len(feature.bytes_list.value[0])} bytes>"
+                        )
                 elif feature.int64_list.value:
                     values.append(list(feature.int64_list.value))
                 elif feature.float_list.value:
@@ -297,9 +301,7 @@ def sample_records(
 
         # Find which sample indices fall in this file
         indices_in_file = [
-            idx - start_idx
-            for idx in sample_indices
-            if start_idx <= idx < end_idx
+            idx - start_idx for idx in sample_indices if start_idx <= idx < end_idx
         ]
 
         if not indices_in_file:
@@ -402,7 +404,9 @@ def compute_statistics(samples: List[Dict[str, Any]]) -> Dict[str, Any]:
         return {}
 
     frame_counts = [s["num_frames"] for s in samples if s["num_frames"] > 0]
-    avg_image_bytes = [s["avg_image_bytes"] for s in samples if s["avg_image_bytes"] > 0]
+    avg_image_bytes = [
+        s["avg_image_bytes"] for s in samples if s["avg_image_bytes"] > 0
+    ]
 
     # Collect all unique text fields
     all_text_fields = set()
@@ -454,7 +458,9 @@ def compute_statistics(samples: List[Dict[str, Any]]) -> Dict[str, Any]:
         },
         "image_stats": {
             "unique_sizes": unique_sizes,
-            "avg_bytes_per_image": float(np.mean(avg_image_bytes)) if avg_image_bytes else 0,
+            "avg_bytes_per_image": (
+                float(np.mean(avg_image_bytes)) if avg_image_bytes else 0
+            ),
         },
         "text_fields": sorted(list(all_text_fields)),
         "context_features": sorted(list(all_context_features)),
@@ -522,12 +528,17 @@ def inspect_dataset(
         "total_files": len(tfrecord_files),
         "total_size_gb": total_size / (1024**3),
         "files": [
-            {"path": str(f.relative_to(data_dir)), "size_mb": f.stat().st_size / (1024**2)}
+            {
+                "path": str(f.relative_to(data_dir)),
+                "size_mb": f.stat().st_size / (1024**2),
+            }
             for f in tfrecord_files[:20]  # List first 20 files
         ],
     }
     if len(tfrecord_files) > 20:
-        report["file_summary"]["note"] = f"... and {len(tfrecord_files) - 20} more files"
+        report["file_summary"][
+            "note"
+        ] = f"... and {len(tfrecord_files) - 20} more files"
 
     logging.info(f"Total size: {total_size / (1024**3):.2f} GB")
 
@@ -541,7 +552,9 @@ def inspect_dataset(
 
     for i, filepath in enumerate(tfrecord_files):
         if i % 10 == 0:
-            logging.info(f"Processing file {i+1}/{len(tfrecord_files)}: {filepath.name}")
+            logging.info(
+                f"Processing file {i+1}/{len(tfrecord_files)}: {filepath.name}"
+            )
 
         is_valid, error_msg, record_count = check_file_integrity(filepath)
 
@@ -679,9 +692,7 @@ def print_report(report: Dict[str, Any]) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Inspect downloaded RoboVQA dataset"
-    )
+    parser = argparse.ArgumentParser(description="Inspect downloaded RoboVQA dataset")
     parser.add_argument(
         "--data-dir",
         type=str,
