@@ -116,6 +116,13 @@ class VLATrainer:
         
         # Load model
         logger.info(f"Loading model: {self.config.model.model_name}")
+        
+        # Build max_memory dict if specified
+        max_memory = None
+        if self.config.model.max_memory_gb:
+            max_memory = {0: f"{self.config.model.max_memory_gb}GiB"}
+            logger.info(f"Using max_memory override: {max_memory}")
+        
         self.model, self.tokenizer, self.processor = load_internvl3(
             model_name=self.config.model.model_name,
             model_path=self.config.model.model_path,
@@ -123,6 +130,7 @@ class VLATrainer:
             torch_dtype=self.config.model.torch_dtype,
             attn_implementation=self.config.model.attn_implementation,
             gradient_checkpointing=self.config.model.gradient_checkpointing,
+            max_memory=max_memory,
             lora_config={
                 "lora_r": self.config.model.lora_r,
                 "lora_alpha": self.config.model.lora_alpha,

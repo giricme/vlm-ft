@@ -149,6 +149,7 @@ def load_internvl3(
     attn_implementation: str = "flash_attention_2",
     gradient_checkpointing: bool = True,
     lora_config: Optional[Dict] = None,
+    max_memory: Optional[Dict] = None,  # e.g., {0: "120GiB"} for DGX Spark
 ) -> Tuple[Any, Any, Any]:
     """
     Load InternVL3 model with optional QLoRA.
@@ -163,6 +164,7 @@ def load_internvl3(
         attn_implementation: Attention implementation (flash_attention_2)
         gradient_checkpointing: Enable gradient checkpointing
         lora_config: Custom LoRA configuration dict
+        max_memory: Override memory detection, e.g., {0: "120GiB"} for DGX Spark
     
     Returns:
         Tuple of (model, tokenizer, processor)
@@ -213,6 +215,10 @@ def load_internvl3(
     
     if quantization_config is not None:
         model_kwargs["quantization_config"] = quantization_config
+    
+    # Override memory detection (needed for DGX Spark unified memory)
+    if max_memory is not None:
+        model_kwargs["max_memory"] = max_memory
     
     # Try to use flash attention
     try:

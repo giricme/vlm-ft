@@ -35,6 +35,10 @@ class ModelConfig:
     attn_implementation: str = "flash_attention_2"
     gradient_checkpointing: bool = True
     
+    # Memory override for unified memory systems (DGX Spark)
+    # e.g., "120GiB" - set to available GPU memory
+    max_memory_gb: Optional[int] = None
+    
     # LoRA config
     lora_r: int = 64
     lora_alpha: int = 128

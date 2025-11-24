@@ -47,6 +47,9 @@ model:
   attn_implementation: flash_attention_2
   gradient_checkpointing: true
   
+  # Memory override for DGX Spark unified memory (set to ~90% of 128GB)
+  max_memory_gb: 115
+  
   # LoRA parameters
   lora_r: 64
   lora_alpha: 128
