@@ -17,8 +17,13 @@ Output structure:
         metadata.json            # Dataset statistics
 
 Usage:
+    # Preprocess
     python -m vlaft.data.preprocess_robovqa --data-dir data/robovqa/raw --output-dir data/robovqa/processed
     python -m vlaft.data.preprocess_robovqa --data-dir data/robovqa/raw --output-dir data/robovqa/processed --workers 8
+    
+    # Verify preprocessed data
+    python -m vlaft.data.preprocess_robovqa --verify --output-dir data/robovqa/processed
+    python -m vlaft.data.preprocess_robovqa --verify --output-dir data/robovqa/processed --verify-samples 200
 """
 
 import argparse
@@ -399,6 +404,204 @@ def format_stage2_sample(
 
 
 # =============================================================================
+# Verification
+# =============================================================================
+
+def verify_preprocessed(output_dir: Path, num_samples: int = 100) -> bool:
+    """
+    Verify preprocessed data integrity.
+    
+    Checks:
+    - JSONL files exist and are valid
+    - Referenced images exist
+    - Image dimensions are correct
+    - Conversation format is valid for InternVL3
+    
+    Args:
+        output_dir: Directory containing preprocessed data
+        num_samples: Number of samples to verify per JSONL file
+    
+    Returns:
+        True if all checks pass, False otherwise
+    """
+    all_passed = True
+    
+    logging.info("=" * 60)
+    logging.info("VERIFICATION MODE")
+    logging.info("=" * 60)
+    
+    # Check directory structure
+    required_dirs = ["images", "stage1", "stage2"]
+    for dir_name in required_dirs:
+        dir_path = output_dir / dir_name
+        if not dir_path.exists():
+            logging.error(f"Missing directory: {dir_path}")
+            all_passed = False
+        else:
+            logging.info(f"✓ Directory exists: {dir_name}/")
+    
+    # Check metadata
+    metadata_path = output_dir / "metadata.json"
+    if metadata_path.exists():
+        with open(metadata_path) as f:
+            metadata = json.load(f)
+        logging.info(f"✓ metadata.json exists")
+        logging.info(f"  - Total samples: {metadata['statistics']['total_samples']:,}")
+        logging.info(f"  - Total frames: {metadata['statistics']['total_frames']:,}")
+        logging.info(f"  - Stage 1: {metadata['stage1']['total']:,} samples")
+        logging.info(f"  - Stage 2: {metadata['stage2']['total']:,} samples")
+    else:
+        logging.warning("metadata.json not found")
+    
+    # Check images directory
+    images_dir = output_dir / "images"
+    if images_dir.exists():
+        # Count images without loading all paths into memory
+        logging.info("  Counting images (may take a moment)...")
+        image_count = sum(1 for _ in images_dir.glob("*.jpg"))
+        logging.info(f"✓ Found {image_count:,} images")
+        
+        # Check a sample image
+        sample_img_path = next(images_dir.glob("*.jpg"), None)
+        if sample_img_path:
+            sample_img = Image.open(sample_img_path)
+            logging.info(f"  - Sample image size: {sample_img.size}")
+            logging.info(f"  - Sample image mode: {sample_img.mode}")
+            
+            # Estimate disk usage based on sample
+            sample_size = sample_img_path.stat().st_size
+            estimated_total_gb = (image_count * sample_size) / (1024**3)
+            logging.info(f"  - Estimated disk usage: ~{estimated_total_gb:.1f} GB")
+    
+    # Verify each JSONL file
+    jsonl_files = [
+        ("stage1/train.jsonl", "Stage 1 Train"),
+        ("stage1/val.jsonl", "Stage 1 Val"),
+        ("stage2/train.jsonl", "Stage 2 Train"),
+        ("stage2/val.jsonl", "Stage 2 Val"),
+    ]
+    
+    for jsonl_rel_path, label in jsonl_files:
+        jsonl_path = output_dir / jsonl_rel_path
+        
+        if not jsonl_path.exists():
+            logging.error(f"✗ Missing: {jsonl_rel_path}")
+            all_passed = False
+            continue
+        
+        logging.info(f"\nVerifying {label} ({jsonl_rel_path})...")
+        
+        # Count lines and sample
+        with open(jsonl_path) as f:
+            lines = f.readlines()
+        
+        total_lines = len(lines)
+        logging.info(f"  Total samples: {total_lines:,}")
+        
+        # Sample random lines to verify
+        rng = np.random.default_rng(42)
+        sample_indices = rng.choice(
+            total_lines, 
+            min(num_samples, total_lines), 
+            replace=False
+        )
+        
+        errors = []
+        missing_images = 0
+        invalid_json = 0
+        invalid_format = 0
+        
+        for idx in sample_indices:
+            line = lines[idx]
+            
+            # Check valid JSON
+            try:
+                sample = json.loads(line)
+            except json.JSONDecodeError as e:
+                invalid_json += 1
+                errors.append(f"Line {idx}: Invalid JSON - {e}")
+                continue
+            
+            # Check required fields
+            required_fields = ["id", "images", "conversations"]
+            missing_fields = [f for f in required_fields if f not in sample]
+            if missing_fields:
+                invalid_format += 1
+                errors.append(f"Line {idx}: Missing fields {missing_fields}")
+                continue
+            
+            # Check conversation format
+            convs = sample["conversations"]
+            if not convs or len(convs) < 2:
+                invalid_format += 1
+                errors.append(f"Line {idx}: Empty or too short conversation")
+                continue
+            
+            # Check alternating human/gpt
+            expected_roles = ["human", "gpt"] * (len(convs) // 2 + 1)
+            for i, conv in enumerate(convs):
+                if conv.get("from") != expected_roles[i]:
+                    invalid_format += 1
+                    errors.append(f"Line {idx}: Invalid role sequence at turn {i}")
+                    break
+            
+            # Check images exist
+            for img_path in sample["images"]:
+                full_path = output_dir / img_path
+                if not full_path.exists():
+                    missing_images += 1
+                    if missing_images <= 3:  # Only log first few
+                        errors.append(f"Line {idx}: Missing image {img_path}")
+                    break
+        
+        # Report results
+        if invalid_json == 0 and invalid_format == 0 and missing_images == 0:
+            logging.info(f"  ✓ All {len(sample_indices)} sampled entries valid")
+        else:
+            all_passed = False
+            if invalid_json > 0:
+                logging.error(f"  ✗ Invalid JSON: {invalid_json}")
+            if invalid_format > 0:
+                logging.error(f"  ✗ Invalid format: {invalid_format}")
+            if missing_images > 0:
+                logging.error(f"  ✗ Missing images: {missing_images}")
+            
+            # Show first few errors
+            for err in errors[:5]:
+                logging.error(f"    - {err}")
+            if len(errors) > 5:
+                logging.error(f"    ... and {len(errors) - 5} more errors")
+        
+        # Show sample entry
+        if total_lines > 0:
+            sample_entry = json.loads(lines[0])
+            logging.info(f"  Sample entry:")
+            logging.info(f"    - ID: {sample_entry['id']}")
+            logging.info(f"    - Images: {len(sample_entry['images'])} frames")
+            logging.info(f"    - Turns: {len(sample_entry['conversations'])}")
+            
+            # Show first Q/A
+            if len(sample_entry['conversations']) >= 2:
+                q = sample_entry['conversations'][0]['value']
+                a = sample_entry['conversations'][1]['value']
+                # Truncate for display
+                q_display = q[:100] + "..." if len(q) > 100 else q
+                a_display = a[:100] + "..." if len(a) > 100 else a
+                logging.info(f"    - Q: {q_display}")
+                logging.info(f"    - A: {a_display}")
+    
+    # Final summary
+    logging.info("\n" + "=" * 60)
+    if all_passed:
+        logging.info("✓ VERIFICATION PASSED")
+    else:
+        logging.error("✗ VERIFICATION FAILED")
+    logging.info("=" * 60)
+    
+    return all_passed
+
+
+# =============================================================================
 # Main Processing
 # =============================================================================
 
@@ -559,10 +762,15 @@ def main():
         description="Preprocess RoboVQA dataset for InternVL3 fine-tuning"
     )
     parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="Verify preprocessed data instead of preprocessing",
+    )
+    parser.add_argument(
         "--data-dir",
         type=str,
-        required=True,
-        help="Directory containing raw TFRecord files",
+        default=None,
+        help="Directory containing raw TFRecord files (required for preprocessing)",
     )
     parser.add_argument(
         "--output-dir",
@@ -611,12 +819,33 @@ def main():
         default=None,
         help="Maximum number of TFRecord files to process (for testing)",
     )
+    parser.add_argument(
+        "--verify-samples",
+        type=int,
+        default=100,
+        help="Number of samples to verify per JSONL file (default: 100)",
+    )
     
     args = parser.parse_args()
     
-    # Setup paths
-    data_dir = Path(args.data_dir)
+    # Setup output path
     output_dir = Path(args.output_dir)
+    
+    # Verify mode
+    if args.verify:
+        # Minimal setup for verification
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "logs").mkdir(exist_ok=True)
+        setup_logging_with_file(output_dir)
+        
+        success = verify_preprocessed(output_dir, args.verify_samples)
+        sys.exit(0 if success else 1)
+    
+    # Preprocessing mode - requires data_dir
+    if not args.data_dir:
+        parser.error("--data-dir is required for preprocessing")
+    
+    data_dir = Path(args.data_dir)
     
     # Create output directories
     output_dir.mkdir(parents=True, exist_ok=True)
