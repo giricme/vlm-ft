@@ -192,7 +192,6 @@ def parse_tfrecord_sample(serialized: bytes) -> Optional[RoboVQASample]:
             'texts': tf.io.FixedLenSequenceFeature([], tf.string),
             'texts_start': tf.io.FixedLenSequenceFeature([], tf.int64),
             'texts_end': tf.io.FixedLenSequenceFeature([], tf.int64),
-            'timestamps': tf.io.FixedLenSequenceFeature([], tf.float32),
         }
         
         context, sequences = tf.io.parse_single_sequence_example(
@@ -209,7 +208,7 @@ def parse_tfrecord_sample(serialized: bytes) -> Optional[RoboVQASample]:
         texts = [t.numpy().decode('utf-8') for t in sequences['texts']]
         texts_start = sequences['texts_start'].numpy().tolist()
         texts_end = sequences['texts_end'].numpy().tolist()
-        timestamps = sequences['timestamps'].numpy().tolist()
+        timestamps = []  # Skip timestamps - not needed for training
         
         # Parse all QA pairs from text fields
         qa_pairs = []
