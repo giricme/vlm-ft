@@ -1,7 +1,7 @@
 """Training configuration for VLA fine-tuning."""
 
+from dataclasses import asdict, dataclass, field
 import logging
-from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class DataConfig:
     """Data configuration."""
-    
+
     data_dir: str = "data/robovqa/processed"
     images_subdir: str = "images"
     stage: int = 1
@@ -27,18 +27,18 @@ class DataConfig:
 @dataclass
 class ModelConfig:
     """Model configuration."""
-    
+
     model_name: str = "InternVL3-8B"
     model_path: Optional[str] = None  # Override HF path
     use_qlora: bool = True
     torch_dtype: str = "bfloat16"
     attn_implementation: str = "flash_attention_2"
     gradient_checkpointing: bool = True
-    
+
     # Memory override for unified memory systems (DGX Spark)
     # e.g., "120GiB" - set to available GPU memory
     max_memory_gb: Optional[int] = None
-    
+
     # LoRA config
     lora_r: int = 64
     lora_alpha: int = 128
@@ -49,7 +49,7 @@ class ModelConfig:
 @dataclass
 class OptimizerConfig:
     """Optimizer configuration."""
-    
+
     optimizer: str = "adamw"
     learning_rate: float = 2e-4
     weight_decay: float = 0.01
@@ -57,7 +57,7 @@ class OptimizerConfig:
     warmup_steps: Optional[int] = None
     lr_scheduler: str = "cosine"
     max_grad_norm: float = 1.0
-    
+
     # AdamW betas
     adam_beta1: float = 0.9
     adam_beta2: float = 0.95
@@ -67,40 +67,40 @@ class OptimizerConfig:
 @dataclass
 class TrainingConfig:
     """Complete training configuration."""
-    
+
     # Experiment metadata
     experiment_name: str = "robovqa_stage1"
     output_dir: str = "experiments"
     seed: int = 42
-    
+
     # Training parameters
     batch_size: int = 4
     gradient_accumulation_steps: int = 8
     num_epochs: int = 3
     max_steps: Optional[int] = None  # Override num_epochs
-    
+
     # Evaluation
     eval_steps: int = 500
     eval_batch_size: int = 8
     eval_samples: int = 1000  # Max eval samples
-    
+
     # Checkpointing
     save_steps: int = 1000
     save_total_limit: int = 3
     resume_from_checkpoint: Optional[str] = None
-    
+
     # Logging
     logging_steps: int = 10
     log_level: str = "INFO"
     wandb_enabled: bool = False
     wandb_project: str = "vla-ft"
     wandb_mode: str = "offline"
-    
+
     # Nested configs
     data: DataConfig = field(default_factory=DataConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     optimizer: OptimizerConfig = field(default_factory=OptimizerConfig)
-    
+
     def __post_init__(self):
         """Validate configuration."""
         # Ensure nested configs are proper dataclasses
@@ -110,26 +110,26 @@ class TrainingConfig:
             self.model = ModelConfig(**self.model)
         if isinstance(self.optimizer, dict):
             self.optimizer = OptimizerConfig(**self.optimizer)
-    
+
     @property
     def effective_batch_size(self) -> int:
         """Compute effective batch size with gradient accumulation."""
         return self.batch_size * self.gradient_accumulation_steps
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert config to dictionary."""
         return asdict(self)
-    
+
     def save(self, path: str):
         """Save configuration to YAML file."""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         with open(path, "w") as f:
             yaml.dump(self.to_dict(), f, default_flow_style=False, sort_keys=False)
-        
+
         logger.info(f"Saved config to {path}")
-    
+
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> "TrainingConfig":
         """Create config from dictionary."""
@@ -139,16 +139,16 @@ class TrainingConfig:
 def load_config(config_path: str) -> TrainingConfig:
     """
     Load configuration from YAML file.
-    
+
     Args:
         config_path: Path to YAML config file
-    
+
     Returns:
         TrainingConfig instance
     """
     with open(config_path, "r") as f:
         config_dict = yaml.safe_load(f)
-    
+
     return TrainingConfig.from_dict(config_dict)
 
 
