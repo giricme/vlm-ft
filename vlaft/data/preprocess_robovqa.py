@@ -629,8 +629,8 @@ def main():
     # Setup logging
     setup_logging_with_file(output_dir)
     
-    # Find TFRecord files
-    tfrecord_files = sorted(data_dir.glob("*.tfrecord"))
+    # Find TFRecord files (recursive search)
+    tfrecord_files = sorted(data_dir.glob("**/*.tfrecord"))
     if args.max_files:
         tfrecord_files = tfrecord_files[:args.max_files]
     
