@@ -1,15 +1,21 @@
 # Stage 1: Split QA Training
 # Basic visual grounding with single QA pairs
 # Start with 10% subset for validation before scaling
+#
+# Hyperparameters aligned with InternVL2/3 official LoRA fine-tuning scripts:
+# https://github.com/OpenGVLab/InternVL/blob/main/internvl_chat/shell/internvl2.0/2nd_finetune/
 
 experiment_name: robovqa_stage1
 output_dir: experiments
 seed: 42
 
 # Training parameters
+# Note: InternVL uses effective batch size 512 with lr=4e-5
+# With our batch size 32 (1/16th), we keep lr=4e-5 (same, not scaled down
+# since LoRA is less sensitive to batch size scaling)
 batch_size: 4
 gradient_accumulation_steps: 8  # Effective batch size: 32
-num_epochs: 3
+num_epochs: 1                   # InternVL uses 1 epoch; increase if underfitting
 max_steps: null  # Set to limit training steps
 
 # Evaluation and checkpointing
@@ -32,9 +38,9 @@ data:
   data_dir: data/robovqa/processed
   images_subdir: images
   stage: 1
-  max_frames: 4          # Reduced from 16
+  max_frames: 4          # Reduced from 16 for memory
   max_dynamic_patch: 1   # Force single tile per frame
-  max_length: 2048       # Now sufficient: 4×1×256=1024 vision + 1024 text
+  max_length: 2048       # 4 frames x 1 tile x 256 = 1024 vision + 1024 text
   subset_ratio: 0.1
   max_samples: null
   num_workers: 4
@@ -51,21 +57,21 @@ model:
   # Memory override for DGX Spark unified memory (set to ~90% of 128GB)
   max_memory_gb: 115
   
-  # LoRA parameters
-  lora_r: 64
-  lora_alpha: 128
+  # LoRA parameters - aligned with InternVL official (r=128, alpha=2*r)
+  lora_r: 128
+  lora_alpha: 256        # 2x r heuristic for optimal scaling
   lora_dropout: 0.05
-  lora_target_modules: null  # Auto-detect
+  lora_target_modules: null  # Auto-detect (q,k,v,o_proj + gate,up,down_proj)
 
-# Optimizer configuration
+# Optimizer configuration - aligned with InternVL official
 optimizer:
   optimizer: adamw
-  learning_rate: 2.0e-4
+  learning_rate: 4.0e-5   # InternVL official LoRA learning rate
   weight_decay: 0.01
   warmup_ratio: 0.03
   warmup_steps: null  # Override warmup_ratio if set
   lr_scheduler: cosine
   max_grad_norm: 1.0
   adam_beta1: 0.9
-  adam_beta2: 0.95
+  adam_beta2: 0.999       # Standard AdamW default
   adam_epsilon: 1.0e-8

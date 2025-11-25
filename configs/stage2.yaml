@@ -1,15 +1,19 @@
 # Stage 2: Multi-turn Training
 # Reasoning chains with conversation context
 # Builds on Stage 1 - load checkpoint from stage1/best
+#
+# Hyperparameters aligned with InternVL2/3 official LoRA fine-tuning scripts
+# Stage 2 uses slightly lower LR since we're continuing from Stage 1
 
 experiment_name: robovqa_stage2
 output_dir: experiments
 seed: 42
 
 # Training parameters
+# Lower LR than Stage 1 for continued fine-tuning (2e-5 vs 4e-5)
 batch_size: 2  # Smaller for longer sequences
 gradient_accumulation_steps: 16  # Effective batch size: 32
-num_epochs: 2
+num_epochs: 1  # Single epoch to avoid overfitting
 max_steps: null
 
 # Evaluation and checkpointing
@@ -36,8 +40,9 @@ data:
   images_subdir: images
   stage: 2  # Multi-turn conversations
   max_frames: 16
-  max_length: 4096  # Longer for multi-turn context
-  subset_ratio: 0.1  # Start with 10%
+  max_dynamic_patch: 1   # Force single tile per frame for memory
+  max_length: 4096       # Longer for multi-turn context
+  subset_ratio: 0.1      # Start with 10%
   max_samples: null
   num_workers: 4
 
@@ -50,21 +55,24 @@ model:
   attn_implementation: flash_attention_2
   gradient_checkpointing: true
   
+  # Memory override for DGX Spark
+  max_memory_gb: 115
+  
   # LoRA parameters (same as stage 1 for continuity)
-  lora_r: 64
-  lora_alpha: 128
+  lora_r: 128
+  lora_alpha: 256        # 2x r heuristic
   lora_dropout: 0.05
   lora_target_modules: null
 
 # Optimizer configuration
 optimizer:
   optimizer: adamw
-  learning_rate: 1.0e-4  # Lower LR for stage 2 fine-tuning
+  learning_rate: 2.0e-5  # Half of Stage 1 LR for continued fine-tuning
   weight_decay: 0.01
   warmup_ratio: 0.03
   warmup_steps: null
   lr_scheduler: cosine
   max_grad_norm: 1.0
   adam_beta1: 0.9
-  adam_beta2: 0.95
+  adam_beta2: 0.999      # Standard AdamW default
   adam_epsilon: 1.0e-8
