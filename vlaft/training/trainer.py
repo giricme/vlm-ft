@@ -17,6 +17,7 @@ from tqdm import tqdm
 from vlaft.data.dataloader import load_stage_data
 from vlaft.models.internvl import load_internvl3, save_lora_weights
 from vlaft.training.config import TrainingConfig
+from vlaft.utils.logging_utils import CSVLogger
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,13 @@ class VLATrainer:
         self.eval_dataloader = None
         self.scaler = None
         self.wandb_logger = None
+
+        # Initialize CSV logger for metrics
+        self.csv_logger = CSVLogger(
+            log_dir=self.exp_dir / "logs",
+            experiment_name=config.experiment_name,
+            enabled=True,
+        )
 
     def _setup_logging(self):
         """Set up file and console logging."""
@@ -539,12 +547,23 @@ class VLATrainer:
         }
 
     def _log_metrics(self, metrics: Dict[str, float], step: int):
-        """Log metrics to console and WandB."""
+        """Log metrics to console, CSV, and WandB."""
+        # Add step to metrics for CSV logger
+        metrics_with_step = {"step": step, **metrics}
+
         # Console logging
         metrics_str = ", ".join(
             f"{k}: {v:.4f}" for k, v in metrics.items() if isinstance(v, (int, float))
         )
         logger.info(f"Step {step}: {metrics_str}")
+
+        # CSV logging
+        if self.csv_logger:
+            # Determine if this is train or eval metrics
+            if any(k.startswith("train/") for k in metrics):
+                self.csv_logger.log_train(metrics_with_step)
+            elif any(k.startswith("eval/") for k in metrics):
+                self.csv_logger.log_eval(metrics_with_step)
 
         # WandB logging
         if self.wandb_logger:

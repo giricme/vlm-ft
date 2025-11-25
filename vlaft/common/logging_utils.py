@@ -171,7 +171,7 @@ class WandBLogger:
         self.run = None
 
         if not self.enabled:
-            logging.getLogger("loradqn").info("WandB logging disabled")
+            logging.info("WandB logging disabled")
             return
 
         try:
@@ -189,16 +189,16 @@ class WandBLogger:
                 job_type=job_type,
                 mode=mode,
             )
-            logging.getLogger("loradqn").info(f"WandB initialized in {mode} mode")
+            logging.info(f"WandB initialized in {mode} mode")
 
         except ImportError:
             self.enabled = False
-            logging.getLogger("loradqn").warning(
+            logging.warning(
                 "wandb not installed. Run: pip install wandb. Continuing without wandb."
             )
         except Exception as e:
             self.enabled = False
-            logging.getLogger("loradqn").warning(
+            logging.warning(
                 f"Failed to initialize wandb: {e}. Continuing without wandb."
             )
 
@@ -290,13 +290,15 @@ class CSVLogger:
         self._init_csv(self.train_file, self._get_train_headers())
         # Don't init eval file yet - will do on first log with dynamic headers
 
-        logging.getLogger("loradqn").info(f"CSV logging enabled: {self.log_dir}")
+        logging.info(f"CSV logging enabled: {self.log_dir}")
 
     def _get_train_headers(self) -> List[str]:
         """Get training CSV headers."""
         return [
-            # Basic metrics
             "step",
+            "epoch",
+            "loss",
+            "learning_rate",
             "timestamp",
         ]
 
@@ -304,6 +306,9 @@ class CSVLogger:
         """Get evaluation CSV headers."""
         return [
             "step",
+            "loss",
+            "perplexity",
+            "samples",
             "timestamp",
         ]
 
@@ -325,17 +330,14 @@ class CSVLogger:
 
         from datetime import datetime
 
-        # Helper to get metric with multiple possible keys
-        def get_metric(*keys):
-            for key in keys:
-                if key in metrics and metrics[key] != "":
-                    return metrics[key]
-            return ""
-
-        # Extract and format metrics
+        # Extract and format metrics (handle both prefixed and unprefixed keys)
         row = {
             "step": metrics.get("step", ""),
-            "loss": metrics.get("train/loss", ""),
+            "epoch": metrics.get("train/epoch", metrics.get("epoch", "")),
+            "loss": metrics.get("train/loss", metrics.get("loss", "")),
+            "learning_rate": metrics.get(
+                "train/learning_rate", metrics.get("learning_rate", "")
+            ),
             "timestamp": datetime.now().isoformat(),
         }
 
@@ -343,7 +345,7 @@ class CSVLogger:
 
     def log_eval(self, metrics: Dict[str, Any]):
         """
-        Log evaluation metrics with dynamic column support for action distributions.
+        Log evaluation metrics.
 
         Args:
             metrics: Dictionary with evaluation metrics
@@ -353,22 +355,17 @@ class CSVLogger:
 
         from datetime import datetime
 
-        # Extract and format metrics
+        # Extract and format metrics (handle both prefixed and unprefixed keys)
         row = {
             "step": metrics.get("step", ""),
+            "loss": metrics.get("eval/loss", metrics.get("loss", "")),
+            "perplexity": metrics.get("eval/perplexity", metrics.get("perplexity", "")),
+            "samples": metrics.get("eval/samples", metrics.get("samples", "")),
             "timestamp": datetime.now().isoformat(),
         }
 
-        # Add any action distribution columns dynamically
-        for key, value in metrics.items():
-            if key.startswith("action_") and key not in row:
-                row[key] = value
-
-        # On first write, determine final headers from actual data
+        # On first write, initialize the file with headers
         if not self.eval_headers_written:
-            # Add any action_ columns to headers
-            action_cols = sorted([k for k in row.keys() if k.startswith("action_")])
-            self.eval_headers = self._get_eval_headers() + action_cols
             self._init_csv(self.eval_file, self.eval_headers)
             self.eval_headers_written = True
 
