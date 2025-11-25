@@ -468,7 +468,7 @@ class VLATrainer:
         dtype = getattr(torch, self.config.model.torch_dtype)
 
         with autocast(dtype=dtype, enabled=(dtype != torch.float32)):
-            outputs = self.model(
+            outputs = self.model.base_model.model(
                 pixel_values=batch["pixel_values"],
                 input_ids=batch["input_ids"],
                 attention_mask=batch["attention_mask"],
@@ -498,7 +498,7 @@ class VLATrainer:
             batch = self._to_device(batch)
 
             with autocast(dtype=dtype, enabled=(dtype != torch.float32)):
-                outputs = self.model(
+                outputs = self.model.base_model.model(
                     pixel_values=batch["pixel_values"],
                     input_ids=batch["input_ids"],
                     attention_mask=batch["attention_mask"],
