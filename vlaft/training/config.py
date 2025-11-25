@@ -19,6 +19,7 @@ class DataConfig:
     stage: int = 1
     max_frames: int = 16
     max_length: int = 2048
+    max_dynamic_patch: int = 4 
     subset_ratio: float = 1.0
     max_samples: Optional[int] = None
     num_workers: int = 4
