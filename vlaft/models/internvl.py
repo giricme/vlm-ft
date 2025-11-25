@@ -233,6 +233,8 @@ def load_internvl3(
         lora_kwargs = lora_config or {}
         model = setup_qlora(model, **lora_kwargs)
 
+    model.img_context_token_id = 151667
+    
     # InternVL3 has built-in image transform
     # Access via model.img_context_token_id for special tokens
     return model, tokenizer
