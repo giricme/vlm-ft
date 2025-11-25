@@ -304,11 +304,17 @@ class InternVLCollator:
         
         # Also mask padding
         labels[attention_mask == 0] = -100
+
+        # Flatten for InternVL3: (B, N, C, H, W) -> (B*N, C, H, W)
+        batch_size, num_frames = pixel_values.shape[:2]
+        pixel_values = pixel_values.view(-1, *pixel_values.shape[2:])
+        image_flags = torch.ones(batch_size * num_frames, dtype=torch.long)
         
         return {
             "pixel_values": pixel_values,
             "input_ids": input_ids,
             "attention_mask": attention_mask,
+            "image_flags": image_flags,
             "labels": labels,
         }
 
