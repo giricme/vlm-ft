@@ -299,6 +299,15 @@ class CSVLogger:
             "epoch",
             "loss",
             "learning_rate",
+            # Timing metrics (seconds)
+            "t_data",
+            "t_transfer",
+            "t_forward",
+            "t_backward",
+            "t_optimizer",
+            "t_step",
+            "throughput",  # samples/sec
+            "gpu_mem_gb",
             "timestamp",
         ]
 
@@ -330,14 +339,30 @@ class CSVLogger:
 
         from datetime import datetime
 
+        # Helper to get metric with multiple possible keys
+        def get(key, *alt_keys):
+            if key in metrics:
+                return metrics[key]
+            for alt in alt_keys:
+                if alt in metrics:
+                    return metrics[alt]
+            return ""
+
         # Extract and format metrics (handle both prefixed and unprefixed keys)
         row = {
             "step": metrics.get("step", ""),
-            "epoch": metrics.get("train/epoch", metrics.get("epoch", "")),
-            "loss": metrics.get("train/loss", metrics.get("loss", "")),
-            "learning_rate": metrics.get(
-                "train/learning_rate", metrics.get("learning_rate", "")
-            ),
+            "epoch": get("train/epoch", "epoch"),
+            "loss": get("train/loss", "loss"),
+            "learning_rate": get("train/learning_rate", "learning_rate"),
+            # Timing metrics
+            "t_data": get("train/t_data", "t_data"),
+            "t_transfer": get("train/t_transfer", "t_transfer"),
+            "t_forward": get("train/t_forward", "t_forward"),
+            "t_backward": get("train/t_backward", "t_backward"),
+            "t_optimizer": get("train/t_optimizer", "t_optimizer"),
+            "t_step": get("train/t_step", "t_step"),
+            "throughput": get("train/throughput", "throughput"),
+            "gpu_mem_gb": get("train/gpu_mem_gb", "gpu_mem_gb"),
             "timestamp": datetime.now().isoformat(),
         }
 

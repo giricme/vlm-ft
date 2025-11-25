@@ -243,10 +243,12 @@ class InternVLCollator:
         self.tokens_per_image = max_dynamic_patch * num_image_tokens
 
         # Standard InternVL3 image preprocessing
+        # NOTE: For best performance, preprocess images at 448x448 during data prep
+        # to avoid this resize. BILINEAR is faster than BICUBIC with minimal quality loss.
         self.image_transform = T.Compose(
             [
                 T.Resize(
-                    (image_size, image_size), interpolation=T.InterpolationMode.BICUBIC
+                    (image_size, image_size), interpolation=T.InterpolationMode.BILINEAR
                 ),
                 T.ToTensor(),
                 T.Normalize(
@@ -446,6 +448,8 @@ def create_dataloader(
         collate_fn=collate_fn,
         pin_memory=True,
         drop_last=True,  # Avoid batch size issues with DDP
+        persistent_workers=num_workers > 0,  # Keep workers alive between epochs
+        prefetch_factor=2 if num_workers > 0 else None,  # Prefetch 2 batches per worker
     )
 
     return dataloader

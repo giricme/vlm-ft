@@ -458,14 +458,14 @@ def verify_preprocessed(output_dir: Path, num_samples: int = 100) -> bool:
             logging.error(f"Missing directory: {dir_path}")
             all_passed = False
         else:
-            logging.info(f"✓ Directory exists: {dir_name}/")
+            logging.info(f"âœ“ Directory exists: {dir_name}/")
 
     # Check metadata
     metadata_path = output_dir / "metadata.json"
     if metadata_path.exists():
         with open(metadata_path) as f:
             metadata = json.load(f)
-        logging.info(f"✓ metadata.json exists")
+        logging.info(f"âœ“ metadata.json exists")
         logging.info(f"  - Total samples: {metadata['statistics']['total_samples']:,}")
         logging.info(f"  - Total frames: {metadata['statistics']['total_frames']:,}")
         logging.info(f"  - Stage 1: {metadata['stage1']['total']:,} samples")
@@ -479,7 +479,7 @@ def verify_preprocessed(output_dir: Path, num_samples: int = 100) -> bool:
         # Count images without loading all paths into memory
         logging.info("  Counting images (may take a moment)...")
         image_count = sum(1 for _ in images_dir.glob("*.jpg"))
-        logging.info(f"✓ Found {image_count:,} images")
+        logging.info(f"âœ“ Found {image_count:,} images")
 
         # Check a sample image
         sample_img_path = next(images_dir.glob("*.jpg"), None)
@@ -505,7 +505,7 @@ def verify_preprocessed(output_dir: Path, num_samples: int = 100) -> bool:
         jsonl_path = output_dir / jsonl_rel_path
 
         if not jsonl_path.exists():
-            logging.error(f"✗ Missing: {jsonl_rel_path}")
+            logging.error(f"âœ— Missing: {jsonl_rel_path}")
             all_passed = False
             continue
 
@@ -574,15 +574,15 @@ def verify_preprocessed(output_dir: Path, num_samples: int = 100) -> bool:
 
         # Report results
         if invalid_json == 0 and invalid_format == 0 and missing_images == 0:
-            logging.info(f"  ✓ All {len(sample_indices)} sampled entries valid")
+            logging.info(f"  âœ“ All {len(sample_indices)} sampled entries valid")
         else:
             all_passed = False
             if invalid_json > 0:
-                logging.error(f"  ✗ Invalid JSON: {invalid_json}")
+                logging.error(f"  âœ— Invalid JSON: {invalid_json}")
             if invalid_format > 0:
-                logging.error(f"  ✗ Invalid format: {invalid_format}")
+                logging.error(f"  âœ— Invalid format: {invalid_format}")
             if missing_images > 0:
-                logging.error(f"  ✗ Missing images: {missing_images}")
+                logging.error(f"  âœ— Missing images: {missing_images}")
 
             # Show first few errors
             for err in errors[:5]:
@@ -611,9 +611,9 @@ def verify_preprocessed(output_dir: Path, num_samples: int = 100) -> bool:
     # Final summary
     logging.info("\n" + "=" * 60)
     if all_passed:
-        logging.info("✓ VERIFICATION PASSED")
+        logging.info("âœ“ VERIFICATION PASSED")
     else:
-        logging.error("✗ VERIFICATION FAILED")
+        logging.error("âœ— VERIFICATION FAILED")
     logging.info("=" * 60)
 
     return all_passed
@@ -808,8 +808,8 @@ def main():
     parser.add_argument(
         "--image-size",
         type=int,
-        default=288,
-        help="Target image size (square, default: 288)",
+        default=448,
+        help="Target image size (square, default: 448 for InternVL3)",
     )
     parser.add_argument(
         "--quality",

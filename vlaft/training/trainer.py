@@ -14,10 +14,10 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from tqdm import tqdm
 
+from vlaft.common.logging_utils import CSVLogger
 from vlaft.data.dataloader import load_stage_data
 from vlaft.models.internvl import load_internvl3, save_lora_weights
 from vlaft.training.config import TrainingConfig
-from vlaft.common.logging_utils import CSVLogger
 
 logger = logging.getLogger(__name__)
 
@@ -355,12 +355,43 @@ class VLATrainer:
             self.epoch = epoch
             logger.info(f"Epoch {epoch + 1}/{self.config.num_epochs}")
 
-            for batch_idx, batch in enumerate(self.train_dataloader):
+            # Timing accumulators for averaging over accumulation steps
+            timing_accum = {
+                "t_data": 0.0,
+                "t_transfer": 0.0,
+                "t_forward": 0.0,
+                "t_backward": 0.0,
+            }
+            step_start_time = time.perf_counter()
+
+            # Manual iteration to measure data loading time
+            data_iter = iter(self.train_dataloader)
+            batch_idx = 0
+
+            while True:
+                # Time data loading
+                t_data_start = time.perf_counter()
+                try:
+                    batch = next(data_iter)
+                except StopIteration:
+                    break
+                t_data_end = time.perf_counter()
+                timing_accum["t_data"] += t_data_end - t_data_start
+
                 # Move batch to device
+                t0 = time.perf_counter()
                 batch = self._to_device(batch)
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                t1 = time.perf_counter()
+                timing_accum["t_transfer"] += t1 - t0
 
                 # Forward pass with mixed precision
                 loss = self._training_step(batch)
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                t2 = time.perf_counter()
+                timing_accum["t_forward"] += t2 - t1
 
                 # Scale loss for gradient accumulation
                 scaled_loss = loss / self.config.gradient_accumulation_steps
@@ -370,9 +401,14 @@ class VLATrainer:
                     self.scaler.scale(scaled_loss).backward()
                 else:
                     scaled_loss.backward()
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                t3 = time.perf_counter()
+                timing_accum["t_backward"] += t3 - t2
 
                 accumulated_loss += loss.item()
                 step_in_accumulation += 1
+                batch_idx += 1
 
                 # Gradient accumulation complete
                 if step_in_accumulation >= self.config.gradient_accumulation_steps:
@@ -386,6 +422,7 @@ class VLATrainer:
                     )
 
                     # Optimizer step
+                    t_opt_start = time.perf_counter()
                     if self.scaler is not None:
                         self.scaler.step(self.optimizer)
                         self.scaler.update()
@@ -394,6 +431,13 @@ class VLATrainer:
 
                     self.scheduler.step()
                     self.optimizer.zero_grad()
+                    if torch.cuda.is_available():
+                        torch.cuda.synchronize()
+                    t_opt_end = time.perf_counter()
+                    t_optimizer = t_opt_end - t_opt_start
+
+                    # Total step time
+                    t_step = time.perf_counter() - step_start_time
 
                     self.global_step += 1
 
@@ -404,12 +448,35 @@ class VLATrainer:
                         )
                         lr = self.scheduler.get_last_lr()[0]
 
+                        # Calculate throughput
+                        samples_per_step = (
+                            self.config.batch_size
+                            * self.config.gradient_accumulation_steps
+                        )
+                        throughput = samples_per_step / t_step if t_step > 0 else 0
+
+                        # GPU memory
+                        gpu_mem_gb = (
+                            torch.cuda.memory_allocated() / 1e9
+                            if torch.cuda.is_available()
+                            else 0
+                        )
+
                         self._log_metrics(
                             {
                                 "train/loss": avg_loss,
                                 "train/learning_rate": lr,
                                 "train/epoch": epoch
                                 + batch_idx / len(self.train_dataloader),
+                                # Timing metrics
+                                "train/t_data": timing_accum["t_data"],
+                                "train/t_transfer": timing_accum["t_transfer"],
+                                "train/t_forward": timing_accum["t_forward"],
+                                "train/t_backward": timing_accum["t_backward"],
+                                "train/t_optimizer": t_optimizer,
+                                "train/t_step": t_step,
+                                "train/throughput": throughput,
+                                "train/gpu_mem_gb": gpu_mem_gb,
                             },
                             step=self.global_step,
                         )
@@ -418,12 +485,21 @@ class VLATrainer:
                             {
                                 "loss": f"{avg_loss:.4f}",
                                 "lr": f"{lr:.2e}",
+                                "t/step": f"{t_step:.1f}s",
+                                "samp/s": f"{throughput:.1f}",
                             }
                         )
 
-                    # Reset accumulation
+                    # Reset accumulation and timing
                     accumulated_loss = 0.0
                     step_in_accumulation = 0
+                    timing_accum = {
+                        "t_data": 0.0,
+                        "t_transfer": 0.0,
+                        "t_forward": 0.0,
+                        "t_backward": 0.0,
+                    }
+                    step_start_time = time.perf_counter()
                     progress_bar.update(1)
 
                     # Evaluation

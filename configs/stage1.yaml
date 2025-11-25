@@ -4,6 +4,9 @@
 #
 # Hyperparameters aligned with InternVL2/3 official LoRA fine-tuning scripts:
 # https://github.com/OpenGVLab/InternVL/blob/main/internvl_chat/shell/internvl2.0/2nd_finetune/
+#
+# PERFORMANCE NOTE: If training is slow, re-preprocess images at 448x448:
+#   python preprocess_robovqa.py --data-dir data/robovqa/raw --output-dir data/robovqa/processed --image-size 448
 
 experiment_name: robovqa_stage1
 output_dir: experiments
@@ -26,7 +29,7 @@ save_steps: 1000
 save_total_limit: 3
 resume_from_checkpoint: null
 
-# Logging
+# Logging (includes timing metrics: t_data, t_forward, t_backward, throughput)
 logging_steps: 10
 log_level: INFO
 wandb_enabled: false
@@ -43,7 +46,7 @@ data:
   max_length: 2048       # 4 frames x 1 tile x 256 = 1024 vision + 1024 text
   subset_ratio: 0.1
   max_samples: null
-  num_workers: 4
+  num_workers: 8         # Increase for better data loading parallelism
 
 # Model configuration
 model:
