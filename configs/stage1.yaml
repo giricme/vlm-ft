@@ -32,10 +32,11 @@ data:
   data_dir: data/robovqa/processed
   images_subdir: images
   stage: 1
-  max_frames: 16
-  max_length: 2048
-  subset_ratio: 0.1  # Start with 10% for validation
-  max_samples: null  # Override subset_ratio if set
+  max_frames: 4          # Reduced from 16
+  max_dynamic_patch: 1   # Force single tile per frame
+  max_length: 2048       # Now sufficient: 4×1×256=1024 vision + 1024 text
+  subset_ratio: 0.1
+  max_samples: null
   num_workers: 4
 
 # Model configuration

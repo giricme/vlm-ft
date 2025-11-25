@@ -225,7 +225,7 @@ def load_internvl3(
 
     # Enable gradient checkpointing
     if gradient_checkpointing:
-        model.gradient_checkpointing_enable()
+        model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
         logger.info("Gradient checkpointing enabled")
 
     # Set img_context_token_id BEFORE PEFT wrapping so base model has it
