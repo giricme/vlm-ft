@@ -467,7 +467,9 @@ class VLATrainer:
         # Use bfloat16 autocast if available
         dtype = getattr(torch, self.config.model.torch_dtype)
 
-        with torch.amp.autocast(dtype=dtype, enabled=(dtype != torch.float32)):
+        with torch.amp.autocast(
+            device_type="cuda", dtype=dtype, enabled=(dtype != torch.float32)
+        ):
             outputs = self.model.base_model.model(
                 pixel_values=batch["pixel_values"],
                 input_ids=batch["input_ids"],
@@ -498,7 +500,9 @@ class VLATrainer:
         for batch in tqdm(self.eval_dataloader, desc="Evaluating"):
             batch = self._to_device(batch)
 
-            with torch.amp.autocast(dtype=dtype, enabled=(dtype != torch.float32)):
+            with torch.amp.autocast(
+                device_type="cuda", dtype=dtype, enabled=(dtype != torch.float32)
+            ):
                 outputs = self.model.base_model.model(
                     pixel_values=batch["pixel_values"],
                     input_ids=batch["input_ids"],
