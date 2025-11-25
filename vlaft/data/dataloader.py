@@ -261,6 +261,8 @@ class InternVLCollator:
             images = item["images"]
             question = item["question"]  # Contains <image> markers
             answer = item["answer"]
+            
+            num_images = len(images)  # Actual number of images loaded
 
             # Process images
             processed_images = [self.image_transform(img) for img in images]
@@ -271,16 +273,24 @@ class InternVLCollator:
             prompt = f"{question}\nAnswer:"
             full_text = f"{prompt} {answer}"
 
-            # Split by <image> and tokenize segments
+            # Split by <image> and only use num_images worth of markers
             segments = full_text.split("<image>")
+            
+            # Reconstruct text with only num_images markers
+            # segments[0] + <image> + segments[1] + <image> + ... + segments[num_images] + remaining_segments_joined
+            if len(segments) > num_images + 1:
+                # More <image> markers than images - truncate
+                kept_segments = segments[:num_images + 1]
+                # Join remaining segments without <image> between them
+                remaining = "".join(segments[num_images + 1:])
+                kept_segments[-1] = kept_segments[-1] + remaining
+                segments = kept_segments
 
             input_ids = []
-            prompt_end_idx = 0
-            prompt_with_images = f"{prompt}"
 
             for i, segment in enumerate(segments):
-                if i > 0:
-                    # Insert 256 IMG_CONTEXT tokens for each image
+                if i > 0 and i <= num_images:
+                    # Insert 256 IMG_CONTEXT tokens for each actual image
                     input_ids.extend([IMG_CONTEXT_TOKEN_ID] * NUM_IMG_TOKENS)
 
                 if segment:
@@ -291,10 +301,18 @@ class InternVLCollator:
             input_ids.append(self.tokenizer.eos_token_id)
 
             # Calculate where prompt ends for label masking
-            prompt_segments = prompt.split("<image>")
+            prompt_for_mask = f"{question}\nAnswer:"
+            prompt_segments = prompt_for_mask.split("<image>")
+            # Same truncation logic for prompt
+            if len(prompt_segments) > num_images + 1:
+                kept_segments = prompt_segments[:num_images + 1]
+                remaining = "".join(prompt_segments[num_images + 1:])
+                kept_segments[-1] = kept_segments[-1] + remaining
+                prompt_segments = kept_segments
+                
             prompt_len = 0
             for i, segment in enumerate(prompt_segments):
-                if i > 0:
+                if i > 0 and i <= num_images:
                     prompt_len += NUM_IMG_TOKENS
                 if segment:
                     prompt_len += len(
