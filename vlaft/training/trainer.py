@@ -467,11 +467,22 @@ class VLATrainer:
         # Use bfloat16 autocast if available
         dtype = getattr(torch, self.config.model.torch_dtype)
 
+        # Create image_flags if not in batch (1 = real image, 0 = padding)
+        if "image_flags" not in batch:
+            # pixel_values shape: (batch_size, num_patches, channels, height, width) or similar
+            # Create flags tensor of all 1s (assuming all images are real)
+            pv = batch["pixel_values"]
+            if pv.dim() == 5:  # (batch, num_images, C, H, W)
+                batch["image_flags"] = torch.ones(pv.shape[0], pv.shape[1], dtype=torch.long, device=pv.device)
+            else:  # (batch * num_images, C, H, W) - need to infer
+                batch["image_flags"] = torch.ones(pv.shape[0], 1, dtype=torch.long, device=pv.device)
+
         with autocast(dtype=dtype, enabled=(dtype != torch.float32)):
             outputs = self.model.base_model.model(
                 pixel_values=batch["pixel_values"],
                 input_ids=batch["input_ids"],
                 attention_mask=batch["attention_mask"],
+                image_flags=batch["image_flags"],
                 labels=batch["labels"],
             )
             loss = outputs.loss
@@ -494,6 +505,16 @@ class VLATrainer:
 
         dtype = getattr(torch, self.config.model.torch_dtype)
 
+        # Create image_flags if not in batch (1 = real image, 0 = padding)
+        if "image_flags" not in batch:
+            # pixel_values shape: (batch_size, num_patches, channels, height, width) or similar
+            # Create flags tensor of all 1s (assuming all images are real)
+            pv = batch["pixel_values"]
+            if pv.dim() == 5:  # (batch, num_images, C, H, W)
+                batch["image_flags"] = torch.ones(pv.shape[0], pv.shape[1], dtype=torch.long, device=pv.device)
+            else:  # (batch * num_images, C, H, W) - need to infer
+                batch["image_flags"] = torch.ones(pv.shape[0], 1, dtype=torch.long, device=pv.device)
+
         for batch in tqdm(self.eval_dataloader, desc="Evaluating"):
             batch = self._to_device(batch)
 
@@ -502,6 +523,7 @@ class VLATrainer:
                     pixel_values=batch["pixel_values"],
                     input_ids=batch["input_ids"],
                     attention_mask=batch["attention_mask"],
+                    image_flags=batch["image_flags"],
                     labels=batch["labels"],
                 )
 
