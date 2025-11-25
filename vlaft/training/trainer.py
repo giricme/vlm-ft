@@ -131,6 +131,7 @@ class VLATrainer:
             attn_implementation=self.config.model.attn_implementation,
             gradient_checkpointing=self.config.model.gradient_checkpointing,
             max_memory=max_memory,
+            max_dynamic_patch=self.config.data.max_dynamic_patch,
             lora_config={
                 "lora_r": self.config.model.lora_r,
                 "lora_alpha": self.config.model.lora_alpha,
@@ -154,6 +155,7 @@ class VLATrainer:
             shuffle=True,
             max_frames=self.config.data.max_frames,
             max_length=self.config.data.max_length,
+            max_dynamic_patch=self.config.data.max_dynamic_patch,
         )
 
         self.eval_dataloader = load_stage_data(
@@ -168,6 +170,7 @@ class VLATrainer:
             shuffle=False,
             max_frames=self.config.data.max_frames,
             max_length=self.config.data.max_length,
+            max_dynamic_patch=self.config.data.max_dynamic_patch,
         )
 
         # Create optimizer
@@ -588,6 +591,30 @@ class VLATrainer:
         """
         checkpoint_dir = Path(checkpoint_path)
 
+        # Load LoRA weights first (before optimizer, since optimizer references model params)
+        adapter_path = checkpoint_dir / "adapter"
+        if adapter_path.exists():
+            from peft import set_peft_model_state_dict
+            from safetensors.torch import load_file
+
+            # Load adapter weights - try safetensors first, then pytorch
+            adapter_weights_path = adapter_path / "adapter_model.safetensors"
+            if adapter_weights_path.exists():
+                adapter_state_dict = load_file(str(adapter_weights_path))
+            else:
+                adapter_weights_path = adapter_path / "adapter_model.bin"
+                if adapter_weights_path.exists():
+                    adapter_state_dict = torch.load(
+                        adapter_weights_path, map_location=self.device
+                    )
+                else:
+                    logger.warning(f"No adapter weights found in {adapter_path}")
+                    adapter_state_dict = None
+
+            if adapter_state_dict is not None:
+                set_peft_model_state_dict(self.model, adapter_state_dict)
+                logger.info(f"Loaded adapter weights from {adapter_path}")
+
         # Load training state
         state_path = checkpoint_dir / "training_state.pt"
         if state_path.exists():
@@ -605,16 +632,6 @@ class VLATrainer:
             logger.info(
                 f"Resumed from checkpoint: step={self.global_step}, epoch={self.epoch}"
             )
-
-        # Load LoRA weights
-        adapter_path = checkpoint_dir / "adapter"
-        if adapter_path.exists():
-            from peft import PeftModel
-
-            # This is a bit tricky - we need to load adapter weights
-            # For simplicity, we'll just load the state dict
-            self.model.load_adapter(str(adapter_path), adapter_name="default")
-            logger.info(f"Loaded adapter weights from {adapter_path}")
 
     def _cleanup_checkpoints(self):
         """Remove old checkpoints beyond save_total_limit."""

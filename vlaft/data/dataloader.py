@@ -217,7 +217,9 @@ class InternVLCollator:
         tokenizer,
         max_length: int = 2048,
         image_size: int = 448,  # InternVL3 default
-        num_image_tokens: int = 256,  # InternVL3 uses 256 tokens per image
+        num_image_tokens: int = 256,  # InternVL3 uses 256 tokens per tile
+        max_dynamic_patch: int = 1,  # Tiles per image (1 = no dynamic patching)
+        img_context_token_id: int = 151667,  # InternVL3 default, should come from model
     ):
         """
         Initialize collator.
@@ -226,13 +228,19 @@ class InternVLCollator:
             tokenizer: InternVL3 tokenizer
             max_length: Maximum sequence length
             image_size: Image size for InternVL3 (default 448)
-            num_image_tokens: Number of tokens per image in InternVL3
+            num_image_tokens: Number of tokens per tile in InternVL3
+            max_dynamic_patch: Maximum tiles per image (1 for fixed resolution)
+            img_context_token_id: Token ID for image context (from model config)
         """
         import torchvision.transforms as T
 
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.num_image_tokens = num_image_tokens
+        self.max_dynamic_patch = max_dynamic_patch
+        self.img_context_token_id = img_context_token_id
+        # Tokens per image = tiles_per_image * tokens_per_tile
+        self.tokens_per_image = max_dynamic_patch * num_image_tokens
 
         # Standard InternVL3 image preprocessing
         self.image_transform = T.Compose(
@@ -250,9 +258,6 @@ class InternVLCollator:
 
     def __call__(self, batch: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
         """Collate batch for InternVL3."""
-        IMG_CONTEXT_TOKEN_ID = 151667
-        NUM_IMG_TOKENS = 256
-
         batch_images = []
         batch_input_ids = []
         batch_labels = []
@@ -261,7 +266,7 @@ class InternVLCollator:
             images = item["images"]
             question = item["question"]  # Contains <image> markers
             answer = item["answer"]
-            
+
             num_images = len(images)  # Actual number of images loaded
 
             # Process images
@@ -275,14 +280,14 @@ class InternVLCollator:
 
             # Split by <image> and only use num_images worth of markers
             segments = full_text.split("<image>")
-            
+
             # Reconstruct text with only num_images markers
             # segments[0] + <image> + segments[1] + <image> + ... + segments[num_images] + remaining_segments_joined
             if len(segments) > num_images + 1:
                 # More <image> markers than images - truncate
-                kept_segments = segments[:num_images + 1]
+                kept_segments = segments[: num_images + 1]
                 # Join remaining segments without <image> between them
-                remaining = "".join(segments[num_images + 1:])
+                remaining = "".join(segments[num_images + 1 :])
                 kept_segments[-1] = kept_segments[-1] + remaining
                 segments = kept_segments
 
@@ -290,8 +295,10 @@ class InternVLCollator:
 
             for i, segment in enumerate(segments):
                 if i > 0 and i <= num_images:
-                    # Insert 256 IMG_CONTEXT tokens for each actual image
-                    input_ids.extend([IMG_CONTEXT_TOKEN_ID] * NUM_IMG_TOKENS)
+                    # Insert tokens_per_image IMG_CONTEXT tokens for each actual image
+                    input_ids.extend(
+                        [self.img_context_token_id] * self.tokens_per_image
+                    )
 
                 if segment:
                     tokens = self.tokenizer.encode(segment, add_special_tokens=False)
@@ -305,15 +312,15 @@ class InternVLCollator:
             prompt_segments = prompt_for_mask.split("<image>")
             # Same truncation logic for prompt
             if len(prompt_segments) > num_images + 1:
-                kept_segments = prompt_segments[:num_images + 1]
-                remaining = "".join(prompt_segments[num_images + 1:])
+                kept_segments = prompt_segments[: num_images + 1]
+                remaining = "".join(prompt_segments[num_images + 1 :])
                 kept_segments[-1] = kept_segments[-1] + remaining
                 prompt_segments = kept_segments
-                
+
             prompt_len = 0
             for i, segment in enumerate(prompt_segments):
                 if i > 0 and i <= num_images:
-                    prompt_len += NUM_IMG_TOKENS
+                    prompt_len += self.tokens_per_image
                 if segment:
                     prompt_len += len(
                         self.tokenizer.encode(segment, add_special_tokens=False)
@@ -329,7 +336,8 @@ class InternVLCollator:
         pixel_values = torch.stack(batch_images, dim=0)
         batch_size, num_frames = pixel_values.shape[:2]
         pixel_values = pixel_values.view(-1, *pixel_values.shape[2:])
-        image_flags = torch.ones(batch_size * num_frames, dtype=torch.long)
+        # image_flags: one entry per tile in pixel_values (derived from actual shape)
+        image_flags = torch.ones(pixel_values.shape[0], dtype=torch.long)
 
         # Pad sequences
         input_ids = torch.nn.utils.rnn.pad_sequence(
@@ -367,6 +375,7 @@ def create_dataloader(
     shuffle: bool = True,
     max_frames: int = 16,
     max_length: int = 2048,
+    max_dynamic_patch: int = 1,
     seed: int = 42,
     image_size: int = 448,  # Default InternVL3 image size
 ) -> DataLoader:
@@ -403,18 +412,30 @@ def create_dataloader(
     # Create collator if tokenizer provided
     collate_fn = None
     if tokenizer is not None:
-        # Try to get image size from model config
-        if model is not None and hasattr(model, "config"):
-            try:
-                # InternVL3 stores image size in vision config
-                image_size = getattr(model.config, "force_image_size", image_size)
-            except:
-                pass
+        # Try to get config values from model
+        img_context_token_id = 151667  # Default for InternVL3
+        if model is not None:
+            # Try to get image size from model config
+            if hasattr(model, "config"):
+                try:
+                    image_size = getattr(model.config, "force_image_size", image_size)
+                except:
+                    pass
+            # Get img_context_token_id from model (set in internvl.py)
+            # Check both wrapped and base model for PEFT compatibility
+            if hasattr(model, "img_context_token_id"):
+                img_context_token_id = model.img_context_token_id
+            elif hasattr(model, "base_model") and hasattr(model.base_model, "model"):
+                base = model.base_model.model
+                if hasattr(base, "img_context_token_id"):
+                    img_context_token_id = base.img_context_token_id
 
         collate_fn = InternVLCollator(
             tokenizer=tokenizer,
             max_length=max_length,
             image_size=image_size,
+            max_dynamic_patch=max_dynamic_patch,
+            img_context_token_id=img_context_token_id,
         )
 
     dataloader = DataLoader(
@@ -435,6 +456,7 @@ def load_stage_data(
     data_dir: str,
     stage: int,
     split: str = "train",
+    max_dynamic_patch: int = 1,
     **kwargs,
 ) -> DataLoader:
     """
@@ -461,5 +483,6 @@ def load_stage_data(
     return create_dataloader(
         jsonl_path=str(jsonl_path),
         images_dir=str(images_dir),
+        max_dynamic_patch=max_dynamic_patch,
         **kwargs,
     )

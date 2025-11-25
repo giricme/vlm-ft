@@ -149,6 +149,7 @@ def load_internvl3(
     gradient_checkpointing: bool = True,
     lora_config: Optional[Dict] = None,
     max_memory: Optional[Dict] = None,  # e.g., {0: "120GiB"} for DGX Spark
+    max_dynamic_patch: int = 1,  # Tiles per image (1 = fixed resolution, no dynamic patching)
 ) -> Tuple[Any, Any]:
     """
     Load InternVL3 model with optional QLoRA.
@@ -164,6 +165,7 @@ def load_internvl3(
         gradient_checkpointing: Enable gradient checkpointing
         lora_config: Custom LoRA configuration dict
         max_memory: Override memory detection, e.g., {0: "120GiB"} for DGX Spark
+        max_dynamic_patch: Max tiles per image (1 = fixed resolution preprocessing)
 
     Returns:
         Tuple of (model, tokenizer)
@@ -177,6 +179,7 @@ def load_internvl3(
         config = {"model_id": model_id}
 
     logger.info(f"Loading model: {model_id}")
+    logger.info(f"max_dynamic_patch: {max_dynamic_patch}")
 
     # Set dtype
     dtype = getattr(torch, torch_dtype)
@@ -213,20 +216,68 @@ def load_internvl3(
     if max_memory is not None:
         model_kwargs["max_memory"] = max_memory
 
-    # Try to use flash attention
-    try:
-        model_kwargs["attn_implementation"] = attn_implementation
+    # Check flash attention compatibility before attempting
+    def _check_flash_attn_available() -> bool:
+        """Check if flash attention 2 is available and compatible."""
+        if not torch.cuda.is_available():
+            return False
+        try:
+            import flash_attn
+
+            # Flash attention 2 requires compute capability >= 8.0 (Ampere+)
+            # and the library must be compiled for the current GPU
+            major, minor = torch.cuda.get_device_capability()
+            compute_cap = major * 10 + minor
+            # sm_80+ supported, but very new architectures (sm_120+) may not have compiled kernels yet
+            if compute_cap >= 120:
+                logger.info(
+                    f"GPU compute capability {major}.{minor} (sm_{compute_cap}) - flash_attn may not have prebuilt kernels"
+                )
+                return False
+            if compute_cap < 80:
+                logger.info(
+                    f"GPU compute capability {major}.{minor} (sm_{compute_cap}) - flash attention requires sm_80+"
+                )
+                return False
+            return True
+        except ImportError:
+            return False
+        except Exception:
+            return False
+
+    # Only attempt flash attention if compatible
+    use_flash = (
+        attn_implementation == "flash_attention_2" and _check_flash_attn_available()
+    )
+
+    if use_flash:
+        try:
+            model_kwargs["attn_implementation"] = attn_implementation
+            model = AutoModel.from_pretrained(model_id, **model_kwargs)
+            logger.info(f"Loaded model with {attn_implementation}")
+        except Exception as e:
+            logger.warning(f"Flash attention failed: {e}")
+            model_kwargs.pop("attn_implementation", None)
+            model = AutoModel.from_pretrained(model_id, **model_kwargs)
+            logger.info("Loaded model with default attention")
+    else:
+        if attn_implementation == "flash_attention_2":
+            logger.info("Flash attention not available, using default attention")
         model = AutoModel.from_pretrained(model_id, **model_kwargs)
-        logger.info(f"Loaded model with {attn_implementation}")
-    except Exception as e:
-        logger.warning(f"Flash attention not available: {e}")
-        model_kwargs.pop("attn_implementation", None)
-        model = AutoModel.from_pretrained(model_id, **model_kwargs)
+        logger.info("Loaded model with default attention")
 
     # Enable gradient checkpointing
     if gradient_checkpointing:
-        model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+        model.gradient_checkpointing_enable(
+            gradient_checkpointing_kwargs={"use_reentrant": False}
+        )
         logger.info("Gradient checkpointing enabled")
+
+    # Set max_dynamic_patch on model config to match our preprocessing
+    # This tells InternVL3 to expect single-tile images
+    if hasattr(model, "config"):
+        model.config.max_dynamic_patch = max_dynamic_patch
+        logger.info(f"Set model.config.max_dynamic_patch = {max_dynamic_patch}")
 
     # Set img_context_token_id BEFORE PEFT wrapping so base model has it
     model.img_context_token_id = 151667
