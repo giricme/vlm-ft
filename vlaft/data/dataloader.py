@@ -249,74 +249,84 @@ class InternVLCollator:
         )
 
     def __call__(self, batch: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
-        """
-        Collate batch for InternVL3.
+        """Collate batch for InternVL3."""
+        IMG_CONTEXT_TOKEN_ID = 151667
+        NUM_IMG_TOKENS = 256
 
-        InternVL3 expects:
-        - pixel_values: (B, N, C, H, W) where N is number of images
-        - input_ids: (B, seq_len) with <IMG_CONTEXT> tokens
-        - attention_mask: (B, seq_len)
-        - labels: (B, seq_len) with -100 for non-answer tokens
-        """
         batch_images = []
-        batch_texts = []
-        batch_answers = []
+        batch_input_ids = []
+        batch_labels = []
 
         for item in batch:
-            images = item["images"]  # List of PIL Images
-            question = item["question"]  # Already contains <image> tokens
+            images = item["images"]
+            question = item["question"]  # Contains <image> markers
             answer = item["answer"]
 
-            # Process images with torchvision transforms
+            # Process images
             processed_images = [self.image_transform(img) for img in images]
-            pixel_values = torch.stack(processed_images, dim=0)  # (N, C, H, W)
+            pixel_values = torch.stack(processed_images, dim=0)
             batch_images.append(pixel_values)
 
-            # Question already has <image> tokens from preprocessing
-            # Format: "<image>\n<image>\n...<image>\n[question text]"
+            # Build input_ids with proper <IMG_CONTEXT> tokens
             prompt = f"{question}\nAnswer:"
+            full_text = f"{prompt} {answer}"
 
-            batch_texts.append(prompt)
-            batch_answers.append(answer)
+            # Split by <image> and tokenize segments
+            segments = full_text.split("<image>")
 
-        # Stack images: (B, N, C, H, W)
+            input_ids = []
+            prompt_end_idx = 0
+            prompt_with_images = f"{prompt}"
+
+            for i, segment in enumerate(segments):
+                if i > 0:
+                    # Insert 256 IMG_CONTEXT tokens for each image
+                    input_ids.extend([IMG_CONTEXT_TOKEN_ID] * NUM_IMG_TOKENS)
+
+                if segment:
+                    tokens = self.tokenizer.encode(segment, add_special_tokens=False)
+                    input_ids.extend(tokens)
+
+            # Add EOS
+            input_ids.append(self.tokenizer.eos_token_id)
+
+            # Calculate where prompt ends for label masking
+            prompt_segments = prompt.split("<image>")
+            prompt_len = 0
+            for i, segment in enumerate(prompt_segments):
+                if i > 0:
+                    prompt_len += NUM_IMG_TOKENS
+                if segment:
+                    prompt_len += len(
+                        self.tokenizer.encode(segment, add_special_tokens=False)
+                    )
+
+            # Create labels (mask prompt with -100)
+            labels = [-100] * prompt_len + input_ids[prompt_len:]
+
+            batch_input_ids.append(torch.tensor(input_ids))
+            batch_labels.append(torch.tensor(labels))
+
+        # Stack images: (B, N, C, H, W) -> (B*N, C, H, W)
         pixel_values = torch.stack(batch_images, dim=0)
-
-        # Tokenize prompts + answers for training
-        full_texts = [f"{p} {a}" for p, a in zip(batch_texts, batch_answers)]
-
-        # Tokenize
-        encodings = self.tokenizer(
-            full_texts,
-            padding=True,
-            truncation=True,
-            max_length=self.max_length,
-            return_tensors="pt",
-        )
-
-        input_ids = encodings.input_ids
-        attention_mask = encodings.attention_mask
-
-        # Create labels (mask prompt tokens with -100)
-        labels = input_ids.clone()
-
-        # Find where answer starts for each sample
-        for i, (prompt, answer) in enumerate(zip(batch_texts, batch_answers)):
-            prompt_tokens = self.tokenizer(
-                prompt, add_special_tokens=False, return_tensors="pt"
-            ).input_ids
-            prompt_len = prompt_tokens.shape[1]
-
-            # Mask prompt tokens
-            labels[i, :prompt_len] = -100
-
-        # Also mask padding
-        labels[attention_mask == 0] = -100
-
-        # Flatten for InternVL3: (B, N, C, H, W) -> (B*N, C, H, W)
         batch_size, num_frames = pixel_values.shape[:2]
         pixel_values = pixel_values.view(-1, *pixel_values.shape[2:])
         image_flags = torch.ones(batch_size * num_frames, dtype=torch.long)
+
+        # Pad sequences
+        input_ids = torch.nn.utils.rnn.pad_sequence(
+            batch_input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id
+        )
+        labels = torch.nn.utils.rnn.pad_sequence(
+            batch_labels, batch_first=True, padding_value=-100
+        )
+        attention_mask = (input_ids != self.tokenizer.pad_token_id).long()
+
+        # Truncate if needed
+        if input_ids.shape[1] > self.max_length:
+            input_ids = input_ids[:, : self.max_length]
+            labels = labels[:, : self.max_length]
+            attention_mask = attention_mask[:, : self.max_length]
 
         return {
             "pixel_values": pixel_values,
