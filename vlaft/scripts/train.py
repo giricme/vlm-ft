@@ -21,6 +21,7 @@ Usage:
 
 import argparse
 import logging
+from datetime import datetime
 from pathlib import Path
 import sys
 
@@ -29,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from vlaft.models.internvl import estimate_memory_usage
 from vlaft.training.config import TrainingConfig, load_config
 from vlaft.training.trainer import VLATrainer
+from vlaft.common.logging_utils import CSVLogger, setup_logging
 
 logger = logging.getLogger(__name__)
 
@@ -184,30 +186,49 @@ def print_memory_estimate(config: TrainingConfig):
     print("=" * 60 + "\n")
 
 
+def create_experiment_dir(config: TrainingConfig) -> Path:
+    """Create experiment directory with subdirectories."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    exp_dir = Path(config.output_dir) / f"{config.experiment_name}_{timestamp}"
+    exp_dir.mkdir(parents=True, exist_ok=True)
+    (exp_dir / "checkpoints").mkdir(exist_ok=True)
+    (exp_dir / "logs").mkdir(exist_ok=True)
+    return exp_dir
+
+
 def main():
     args = parse_args()
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-    )
-
-    # Load config
-    logger.info(f"Loading config: {args.config}")
+    # Load config first (before logging setup, so we know experiment name)
     config_dict = load_config(args.config).to_dict()
 
     # Apply overrides
     if args.overrides:
+        # Temporarily set up console-only logging for override messages
+        setup_logging(
+            experiment_dir=Path("."),
+            log_level=logging.INFO,
+            log_to_file=False,
+            log_to_console=True,
+        )
         config_dict = apply_overrides(config_dict, args.overrides)
 
     config = TrainingConfig.from_dict(config_dict)
 
-    # Memory estimation only
+    # Memory estimation only (no experiment dir needed)
     if args.estimate_memory:
         print_memory_estimate(config)
         return
 
     # Validate data
+    # Set up console logging for validation messages
+    setup_logging(
+        experiment_dir=Path("."),
+        log_level=logging.INFO,
+        log_to_file=False,
+        log_to_console=True,
+    )
+    
     if not validate_data_exists(config):
         logger.error("Data validation failed. Run preprocessing first.")
         sys.exit(1)
@@ -219,8 +240,31 @@ def main():
         logger.info("Dry run complete - config is valid")
         return
 
+    # Create experiment directory
+    exp_dir = create_experiment_dir(config)
+
+    # Set up logging with file output
+    setup_logging(
+        experiment_dir=exp_dir,
+        experiment_name=config.experiment_name,
+        log_level=getattr(logging, config.log_level),
+        log_to_file=True,
+        log_to_console=True,
+    )
+    logger.info(f"Experiment directory: {exp_dir}")
+
+    # Save config to experiment directory
+    config.save(exp_dir / "config.yaml")
+
+    # Create CSV logger
+    csv_logger = CSVLogger(
+        log_dir=exp_dir / "logs",
+        experiment_name=config.experiment_name,
+        enabled=True,
+    )
+
     # Train
-    trainer = VLATrainer(config)
+    trainer = VLATrainer(config, exp_dir, csv_logger)
     trainer.setup()
     trainer.train()
 

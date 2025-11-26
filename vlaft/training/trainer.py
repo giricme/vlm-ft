@@ -3,13 +3,12 @@
 from datetime import datetime
 import logging
 import math
-import os
 from pathlib import Path
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 import torch
-from torch.cuda.amp import GradScaler, autocast
+from torch.cuda.amp import GradScaler
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from tqdm import tqdm
@@ -17,6 +16,7 @@ from tqdm import tqdm
 from vlaft.data.dataloader import load_stage_data
 from vlaft.models.internvl import load_internvl3, save_lora_weights
 from vlaft.training.config import TrainingConfig
+from vlaft.utils.logging_utils import CSVLogger
 
 logger = logging.getLogger(__name__)
 
@@ -33,30 +33,19 @@ class VLATrainer:
     - WandB logging (optional)
     """
 
-    def __init__(self, config: TrainingConfig):
+    def __init__(self, config: TrainingConfig, exp_dir: Path, csv_logger: CSVLogger):
         """
         Initialize trainer.
 
         Args:
             config: Training configuration
+            exp_dir: Experiment directory (created by entry point)
+            csv_logger: CSV logger instance (created by entry point)
         """
         self.config = config
+        self.exp_dir = exp_dir
+        self.csv_logger = csv_logger
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        # Set up experiment directory
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.exp_dir = Path(config.output_dir) / f"{config.experiment_name}_{timestamp}"
-        self.exp_dir.mkdir(parents=True, exist_ok=True)
-
-        # Create subdirectories
-        (self.exp_dir / "checkpoints").mkdir(exist_ok=True)
-        (self.exp_dir / "logs").mkdir(exist_ok=True)
-
-        # Save config
-        config.save(self.exp_dir / "config.yaml")
-
-        # Initialize logging
-        self._setup_logging()
 
         # Set seed
         self._set_seed(config.seed)
@@ -75,37 +64,6 @@ class VLATrainer:
         self.eval_dataloader = None
         self.scaler = None
         self.wandb_logger = None
-
-    def _setup_logging(self):
-        """Set up file and console logging."""
-        import sys
-
-        log_file = self.exp_dir / "logs" / "training.log"
-
-        # Get root logger and clear existing handlers
-        root_logger = logging.getLogger()
-        root_logger.setLevel(getattr(logging, self.config.log_level))
-        root_logger.handlers.clear()
-
-        # Create formatter
-        formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
-
-        # File handler
-        file_handler = logging.FileHandler(log_file)
-        file_handler.setLevel(getattr(logging, self.config.log_level))
-        file_handler.setFormatter(formatter)
-        root_logger.addHandler(file_handler)
-
-        # Console handler - explicitly use stdout
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(getattr(logging, self.config.log_level))
-        console_handler.setFormatter(formatter)
-        root_logger.addHandler(console_handler)
-
-        logger.info(f"Experiment directory: {self.exp_dir}")
 
     def _set_seed(self, seed: int):
         """Set random seeds for reproducibility."""
@@ -146,6 +104,7 @@ class VLATrainer:
             attn_implementation=self.config.model.attn_implementation,
             gradient_checkpointing=self.config.model.gradient_checkpointing,
             max_memory=max_memory,
+            max_dynamic_patch=self.config.data.max_dynamic_patch,
             lora_config={
                 "lora_r": self.config.model.lora_r,
                 "lora_alpha": self.config.model.lora_alpha,
@@ -161,7 +120,7 @@ class VLATrainer:
             stage=self.config.data.stage,
             split="train",
             tokenizer=self.tokenizer,
-            model=self.model,  # Pass model for image processing
+            model=self.model,
             batch_size=self.config.batch_size,
             subset_ratio=self.config.data.subset_ratio,
             max_samples=self.config.data.max_samples,
@@ -169,6 +128,7 @@ class VLATrainer:
             shuffle=True,
             max_frames=self.config.data.max_frames,
             max_length=self.config.data.max_length,
+            max_dynamic_patch=self.config.data.max_dynamic_patch,
         )
 
         self.eval_dataloader = load_stage_data(
@@ -183,6 +143,7 @@ class VLATrainer:
             shuffle=False,
             max_frames=self.config.data.max_frames,
             max_length=self.config.data.max_length,
+            max_dynamic_patch=self.config.data.max_dynamic_patch,
         )
 
         # Create optimizer
@@ -359,12 +320,43 @@ class VLATrainer:
             self.epoch = epoch
             logger.info(f"Epoch {epoch + 1}/{self.config.num_epochs}")
 
-            for batch_idx, batch in enumerate(self.train_dataloader):
+            # Timing accumulators for averaging over accumulation steps
+            timing_accum = {
+                "t_data": 0.0,
+                "t_transfer": 0.0,
+                "t_forward": 0.0,
+                "t_backward": 0.0,
+            }
+            step_start_time = time.perf_counter()
+
+            # Manual iteration to measure data loading time
+            data_iter = iter(self.train_dataloader)
+            batch_idx = 0
+            
+            while True:
+                # Time data loading
+                t_data_start = time.perf_counter()
+                try:
+                    batch = next(data_iter)
+                except StopIteration:
+                    break
+                t_data_end = time.perf_counter()
+                timing_accum["t_data"] += (t_data_end - t_data_start)
+                
                 # Move batch to device
+                t0 = time.perf_counter()
                 batch = self._to_device(batch)
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                t1 = time.perf_counter()
+                timing_accum["t_transfer"] += (t1 - t0)
 
                 # Forward pass with mixed precision
                 loss = self._training_step(batch)
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                t2 = time.perf_counter()
+                timing_accum["t_forward"] += (t2 - t1)
 
                 # Scale loss for gradient accumulation
                 scaled_loss = loss / self.config.gradient_accumulation_steps
@@ -374,9 +366,14 @@ class VLATrainer:
                     self.scaler.scale(scaled_loss).backward()
                 else:
                     scaled_loss.backward()
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                t3 = time.perf_counter()
+                timing_accum["t_backward"] += (t3 - t2)
 
                 accumulated_loss += loss.item()
                 step_in_accumulation += 1
+                batch_idx += 1
 
                 # Gradient accumulation complete
                 if step_in_accumulation >= self.config.gradient_accumulation_steps:
@@ -390,6 +387,7 @@ class VLATrainer:
                     )
 
                     # Optimizer step
+                    t_opt_start = time.perf_counter()
                     if self.scaler is not None:
                         self.scaler.step(self.optimizer)
                         self.scaler.update()
@@ -398,6 +396,13 @@ class VLATrainer:
 
                     self.scheduler.step()
                     self.optimizer.zero_grad()
+                    if torch.cuda.is_available():
+                        torch.cuda.synchronize()
+                    t_opt_end = time.perf_counter()
+                    t_optimizer = t_opt_end - t_opt_start
+
+                    # Total step time
+                    t_step = time.perf_counter() - step_start_time
 
                     self.global_step += 1
 
@@ -407,6 +412,13 @@ class VLATrainer:
                             accumulated_loss / self.config.gradient_accumulation_steps
                         )
                         lr = self.scheduler.get_last_lr()[0]
+                        
+                        # Calculate throughput
+                        samples_per_step = self.config.batch_size * self.config.gradient_accumulation_steps
+                        throughput = samples_per_step / t_step if t_step > 0 else 0
+                        
+                        # GPU memory
+                        gpu_mem_gb = torch.cuda.memory_allocated() / 1e9 if torch.cuda.is_available() else 0
 
                         self._log_metrics(
                             {
@@ -414,6 +426,15 @@ class VLATrainer:
                                 "train/learning_rate": lr,
                                 "train/epoch": epoch
                                 + batch_idx / len(self.train_dataloader),
+                                # Timing metrics
+                                "train/t_data": timing_accum["t_data"],
+                                "train/t_transfer": timing_accum["t_transfer"],
+                                "train/t_forward": timing_accum["t_forward"],
+                                "train/t_backward": timing_accum["t_backward"],
+                                "train/t_optimizer": t_optimizer,
+                                "train/t_step": t_step,
+                                "train/throughput": throughput,
+                                "train/gpu_mem_gb": gpu_mem_gb,
                             },
                             step=self.global_step,
                         )
@@ -422,12 +443,16 @@ class VLATrainer:
                             {
                                 "loss": f"{avg_loss:.4f}",
                                 "lr": f"{lr:.2e}",
+                                "t/step": f"{t_step:.1f}s",
+                                "samp/s": f"{throughput:.1f}",
                             }
                         )
 
-                    # Reset accumulation
+                    # Reset accumulation and timing
                     accumulated_loss = 0.0
                     step_in_accumulation = 0
+                    timing_accum = {"t_data": 0.0, "t_transfer": 0.0, "t_forward": 0.0, "t_backward": 0.0}
+                    step_start_time = time.perf_counter()
                     progress_bar.update(1)
 
                     # Evaluation
@@ -551,12 +576,23 @@ class VLATrainer:
         }
 
     def _log_metrics(self, metrics: Dict[str, float], step: int):
-        """Log metrics to console and WandB."""
+        """Log metrics to console, CSV, and WandB."""
+        # Add step to metrics for CSV logger
+        metrics_with_step = {"step": step, **metrics}
+        
         # Console logging
         metrics_str = ", ".join(
             f"{k}: {v:.4f}" for k, v in metrics.items() if isinstance(v, (int, float))
         )
         logger.info(f"Step {step}: {metrics_str}")
+
+        # CSV logging
+        if self.csv_logger:
+            # Determine if this is train or eval metrics
+            if any(k.startswith("train/") for k in metrics):
+                self.csv_logger.log_train(metrics_with_step)
+            elif any(k.startswith("eval/") for k in metrics):
+                self.csv_logger.log_eval(metrics_with_step)
 
         # WandB logging
         if self.wandb_logger:
@@ -603,6 +639,28 @@ class VLATrainer:
         """
         checkpoint_dir = Path(checkpoint_path)
 
+        # Load LoRA weights first (before optimizer, since optimizer references model params)
+        adapter_path = checkpoint_dir / "adapter"
+        if adapter_path.exists():
+            from peft import set_peft_model_state_dict
+            from safetensors.torch import load_file
+            
+            # Load adapter weights - try safetensors first, then pytorch
+            adapter_weights_path = adapter_path / "adapter_model.safetensors"
+            if adapter_weights_path.exists():
+                adapter_state_dict = load_file(str(adapter_weights_path))
+            else:
+                adapter_weights_path = adapter_path / "adapter_model.bin"
+                if adapter_weights_path.exists():
+                    adapter_state_dict = torch.load(adapter_weights_path, map_location=self.device)
+                else:
+                    logger.warning(f"No adapter weights found in {adapter_path}")
+                    adapter_state_dict = None
+            
+            if adapter_state_dict is not None:
+                set_peft_model_state_dict(self.model, adapter_state_dict)
+                logger.info(f"Loaded adapter weights from {adapter_path}")
+
         # Load training state
         state_path = checkpoint_dir / "training_state.pt"
         if state_path.exists():
@@ -620,16 +678,6 @@ class VLATrainer:
             logger.info(
                 f"Resumed from checkpoint: step={self.global_step}, epoch={self.epoch}"
             )
-
-        # Load LoRA weights
-        adapter_path = checkpoint_dir / "adapter"
-        if adapter_path.exists():
-            from peft import PeftModel
-
-            # This is a bit tricky - we need to load adapter weights
-            # For simplicity, we'll just load the state dict
-            self.model.load_adapter(str(adapter_path), adapter_name="default")
-            logger.info(f"Loaded adapter weights from {adapter_path}")
 
     def _cleanup_checkpoints(self):
         """Remove old checkpoints beyond save_total_limit."""
