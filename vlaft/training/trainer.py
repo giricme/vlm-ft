@@ -78,19 +78,32 @@ class VLATrainer:
 
     def _setup_logging(self):
         """Set up file and console logging."""
+        import sys
+
         log_file = self.exp_dir / "logs" / "training.log"
 
-        # Configure root logger
-        # force=True is required because train.py already calls basicConfig
-        logging.basicConfig(
-            level=getattr(logging, self.config.log_level),
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            handlers=[
-                logging.FileHandler(log_file),
-                logging.StreamHandler(),
-            ],
-            force=True,  # Override any existing configuration
+        # Get root logger and clear existing handlers
+        root_logger = logging.getLogger()
+        root_logger.setLevel(getattr(logging, self.config.log_level))
+        root_logger.handlers.clear()
+
+        # Create formatter
+        formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
         )
+
+        # File handler
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(getattr(logging, self.config.log_level))
+        file_handler.setFormatter(formatter)
+        root_logger.addHandler(file_handler)
+
+        # Console handler - explicitly use stdout
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(getattr(logging, self.config.log_level))
+        console_handler.setFormatter(formatter)
+        root_logger.addHandler(console_handler)
 
         logger.info(f"Experiment directory: {self.exp_dir}")
 
