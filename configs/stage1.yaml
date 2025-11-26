@@ -30,7 +30,7 @@ save_total_limit: 3
 resume_from_checkpoint: null
 
 # Logging (includes timing metrics: t_data, t_forward, t_backward, throughput)
-logging_steps: 10
+logging_steps: 1
 log_level: INFO
 wandb_enabled: false
 wandb_project: vla-ft
