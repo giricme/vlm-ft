@@ -582,7 +582,7 @@ class VLATrainer:
         
         # Console logging
         metrics_str = ", ".join(
-            f"{k}: {v:.4f}" for k, v in metrics.items() if isinstance(v, (int, float))
+            f"{k}: {v:.2e}" for k, v in metrics.items() if isinstance(v, (int, float))
         )
         logger.info(f"Step {step}: {metrics_str}")
 
