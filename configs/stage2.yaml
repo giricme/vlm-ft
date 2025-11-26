@@ -52,7 +52,7 @@ model:
   model_path: null
   use_qlora: true
   torch_dtype: bfloat16
-  attn_implementation: flash_attention_2
+  attn_implementation: sdpa # flash_attention_2
   gradient_checkpointing: true
   
   # Memory override for DGX Spark

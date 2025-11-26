@@ -16,8 +16,8 @@ seed: 42
 # Note: InternVL uses effective batch size 512 with lr=4e-5
 # With our batch size 32 (1/16th), we keep lr=4e-5 (same, not scaled down
 # since LoRA is less sensitive to batch size scaling)
-batch_size: 4
-gradient_accumulation_steps: 8  # Effective batch size: 32
+batch_size: 8
+gradient_accumulation_steps: 4  # Effective batch size: 32
 num_epochs: 1                   # InternVL uses 1 epoch; increase if underfitting
 max_steps: null  # Set to limit training steps
 
@@ -54,7 +54,7 @@ model:
   model_path: null  # Use HuggingFace path
   use_qlora: true
   torch_dtype: bfloat16
-  attn_implementation: flash_attention_2
+  attn_implementation: sdpa # flash_attention_2
   gradient_checkpointing: true
   
   # Memory override for DGX Spark unified memory (set to ~90% of 128GB)
