@@ -16,7 +16,7 @@ from tqdm import tqdm
 from vlaft.data.dataloader import load_stage_data
 from vlaft.models.internvl import load_internvl3, save_lora_weights
 from vlaft.training.config import TrainingConfig
-from vlaft.utils.logging_utils import CSVLogger
+from vlaft.common.logging_utils import CSVLogger
 
 logger = logging.getLogger(__name__)
 
