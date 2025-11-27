@@ -16,8 +16,8 @@ seed: 42
 # Note: InternVL uses effective batch size 512 with lr=4e-5
 # With our batch size 32 (1/16th), we keep lr=4e-5 (same, not scaled down
 # since LoRA is less sensitive to batch size scaling)
-batch_size: 8
-gradient_accumulation_steps: 4  # Effective batch size: 32
+batch_size: 2
+gradient_accumulation_steps: 16  # Effective batch size: 32
 num_epochs: 1                   # InternVL uses 1 epoch; increase if underfitting
 max_steps: null  # Set to limit training steps
 
@@ -58,7 +58,7 @@ model:
   gradient_checkpointing: true
   
   # Memory override for DGX Spark unified memory (set to ~90% of 128GB)
-  max_memory_gb: 115
+  max_memory_gb: 110
   
   # LoRA parameters - aligned with InternVL official (r=128, alpha=2*r)
   lora_r: 128
