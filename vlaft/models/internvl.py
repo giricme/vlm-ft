@@ -229,7 +229,7 @@ def load_internvl3(
             major, minor = torch.cuda.get_device_capability()
             compute_cap = major * 10 + minor
             # sm_80+ supported, but very new architectures (sm_120+) may not have compiled kernels yet
-            if compute_cap >= 120:
+            if compute_cap >= 121:
                 logger.info(
                     f"GPU compute capability {major}.{minor} (sm_{compute_cap}) - flash_attn may not have prebuilt kernels"
                 )
@@ -272,6 +272,16 @@ def load_internvl3(
             gradient_checkpointing_kwargs={"use_reentrant": False}
         )
         logger.info("Gradient checkpointing enabled")
+
+
+    # Disable flash attention on vision encoder (avoids dtype issues with QLoRA)
+    # The LLM still uses flash attention via attn_implementation
+    if hasattr(model, 'vision_model'):
+        for layer in model.vision_model.encoder.layers:
+            if hasattr(layer, 'attn') and hasattr(layer.attn, 'use_flash_attn'):
+                layer.attn.use_flash_attn = False
+        logger.info("Disabled flash attention on vision encoder (LLM still uses flash)")
+
 
     # Set max_dynamic_patch on model config to match our preprocessing
     # This tells InternVL3 to expect single-tile images

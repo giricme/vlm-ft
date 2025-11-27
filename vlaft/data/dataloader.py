@@ -357,7 +357,7 @@ class InternVLCollator:
             attention_mask = attention_mask[:, : self.max_length]
 
         return {
-            "pixel_values": pixel_values,
+            "pixel_values": pixel_values.to(torch.bfloat16),
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "image_flags": image_flags,
