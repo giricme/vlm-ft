@@ -25,10 +25,10 @@ save_total_limit: 3
 
 # IMPORTANT: Set this to your Stage 1 checkpoint path
 # Example: experiments/robovqa_stage1_20241201_143000/checkpoints/best
-resume_from_checkpoint: experiments/robovqa_stage1_20251127_171615/checkpoints/best
+resume_from_checkpoint: experiments/robovqa_stage1_20251127_171615/checkpoints/final
 
 # Logging
-logging_steps: 10
+logging_steps: 1
 log_level: INFO
 wandb_enabled: false
 wandb_project: vla-ft
