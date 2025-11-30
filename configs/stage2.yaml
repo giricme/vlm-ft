@@ -39,7 +39,7 @@ data:
   data_dir: data/robovqa/processed
   images_subdir: images
   stage: 2  # Multi-turn conversations
-  max_frames: 16
+  max_frames: 10
   max_dynamic_patch: 1   # Force single tile per frame for memory
   max_length: 4096       # Longer for multi-turn context
   subset_ratio: 0.1      # Start with 10%

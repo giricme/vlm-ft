@@ -210,6 +210,9 @@ class InternVLCollator:
 
     Formats data for InternVL3's chat template with image tokens.
     Uses standard torchvision transforms for image preprocessing.
+    
+    FIXED: Dynamically reduces frames when text + images would exceed max_length,
+    ensuring pixel_values and IMG_CONTEXT tokens always match.
     """
 
     def __init__(
@@ -258,61 +261,75 @@ class InternVLCollator:
             ]
         )
 
+    def _count_text_tokens(self, text: str) -> int:
+        """Count tokens in text, excluding <image> markers."""
+        clean_text = text.replace("<image>", "")
+        return len(self.tokenizer.encode(clean_text, add_special_tokens=False))
+
+    def _count_image_markers(self, text: str) -> int:
+        """Count <image> markers in text."""
+        return text.count("<image>")
+
     def __call__(self, batch: List[Dict[str, Any]]) -> Dict[str, torch.Tensor]:
-        """Collate batch for InternVL3."""
+        """Collate batch for InternVL3 with dynamic frame adjustment."""
         batch_images = []
         batch_input_ids = []
         batch_labels = []
+        batch_num_images = []  # Track actual images used per sample
 
         for item in batch:
             images = item["images"]
             question = item["question"]  # Contains <image> markers
             answer = item["answer"]
 
-            num_images = len(images)  # Actual number of images loaded
-
-            # Process images
-            processed_images = [self.image_transform(img) for img in images]
-            pixel_values = torch.stack(processed_images, dim=0)
-            batch_images.append(pixel_values)
-
-            # Build input_ids with proper <IMG_CONTEXT> tokens
+            # Build full text to measure
             prompt = f"{question}\nAnswer:"
             full_text = f"{prompt} {answer}"
 
-            # Split by <image> and only use num_images worth of markers
+            # Count text tokens (excluding <image> markers) + EOS
+            text_tokens = self._count_text_tokens(full_text) + 1  # +1 for EOS
+
+            # Count image markers in text
+            num_markers = self._count_image_markers(full_text)
+
+            # Calculate how many images we can fit
+            available_for_images = self.max_length - text_tokens
+            max_images_that_fit = max(1, available_for_images // self.tokens_per_image)
+
+            # Use minimum of: loaded images, markers in text, images that fit
+            num_images = min(len(images), num_markers, max_images_that_fit)
+            batch_num_images.append(num_images)
+
+            # Select images to use (first N frames)
+            images_to_use = images[:num_images]
+
+            # Process only the images we're using
+            processed_images = [self.image_transform(img) for img in images_to_use]
+            pixel_values = torch.stack(processed_images, dim=0)
+            batch_images.append(pixel_values)
+
+            # Build input_ids with exactly num_images worth of IMG_CONTEXT tokens
             segments = full_text.split("<image>")
 
-            # Reconstruct text with only num_images markers
-            # segments[0] + <image> + segments[1] + <image> + ... + segments[num_images] + remaining_segments_joined
+            # Reconstruct with only num_images markers
             if len(segments) > num_images + 1:
-                # More <image> markers than images - truncate
                 kept_segments = segments[: num_images + 1]
-                # Join remaining segments without <image> between them
                 remaining = "".join(segments[num_images + 1 :])
                 kept_segments[-1] = kept_segments[-1] + remaining
                 segments = kept_segments
 
             input_ids = []
-
             for i, segment in enumerate(segments):
                 if i > 0 and i <= num_images:
-                    # Insert tokens_per_image IMG_CONTEXT tokens for each actual image
-                    input_ids.extend(
-                        [self.img_context_token_id] * self.tokens_per_image
-                    )
-
+                    input_ids.extend([self.img_context_token_id] * self.tokens_per_image)
                 if segment:
                     tokens = self.tokenizer.encode(segment, add_special_tokens=False)
                     input_ids.extend(tokens)
 
-            # Add EOS
             input_ids.append(self.tokenizer.eos_token_id)
 
-            # Calculate where prompt ends for label masking
-            prompt_for_mask = f"{question}\nAnswer:"
-            prompt_segments = prompt_for_mask.split("<image>")
-            # Same truncation logic for prompt
+            # Calculate prompt length for label masking
+            prompt_segments = prompt.split("<image>")
             if len(prompt_segments) > num_images + 1:
                 kept_segments = prompt_segments[: num_images + 1]
                 remaining = "".join(prompt_segments[num_images + 1 :])
@@ -328,18 +345,37 @@ class InternVLCollator:
                         self.tokenizer.encode(segment, add_special_tokens=False)
                     )
 
-            # Create labels (mask prompt with -100)
             labels = [-100] * prompt_len + input_ids[prompt_len:]
 
             batch_input_ids.append(torch.tensor(input_ids))
             batch_labels.append(torch.tensor(labels))
 
-        # Stack images: (B, N, C, H, W) -> (B*N, C, H, W)
-        pixel_values = torch.stack(batch_images, dim=0)
+        # Stack images - handle variable number of images per sample
+        # Pad to max images in batch
+        max_images_in_batch = max(batch_num_images)
+        padded_images = []
+        image_flags_list = []
+
+        for i, pixel_values in enumerate(batch_images):
+            num_imgs = batch_num_images[i]
+            if num_imgs < max_images_in_batch:
+                # Pad with zeros
+                padding = torch.zeros(
+                    max_images_in_batch - num_imgs,
+                    *pixel_values.shape[1:],
+                    dtype=pixel_values.dtype
+                )
+                pixel_values = torch.cat([pixel_values, padding], dim=0)
+            padded_images.append(pixel_values)
+
+            # image_flags: 1 for real images, 0 for padding
+            flags = [1] * num_imgs + [0] * (max_images_in_batch - num_imgs)
+            image_flags_list.extend(flags)
+
+        pixel_values = torch.stack(padded_images, dim=0)
         batch_size, num_frames = pixel_values.shape[:2]
         pixel_values = pixel_values.view(-1, *pixel_values.shape[2:])
-        # image_flags: one entry per tile in pixel_values (derived from actual shape)
-        image_flags = torch.ones(pixel_values.shape[0], dtype=torch.long)
+        image_flags = torch.tensor(image_flags_list, dtype=torch.long)
 
         # Pad sequences
         input_ids = torch.nn.utils.rnn.pad_sequence(
@@ -350,7 +386,7 @@ class InternVLCollator:
         )
         attention_mask = (input_ids != self.tokenizer.pad_token_id).long()
 
-        # Truncate if needed
+        # Final truncation safety (should rarely trigger now)
         if input_ids.shape[1] > self.max_length:
             input_ids = input_ids[:, : self.max_length]
             labels = labels[:, : self.max_length]
