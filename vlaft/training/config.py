@@ -89,6 +89,7 @@ class TrainingConfig:
     save_steps: int = 1000
     save_total_limit: int = 3
     resume_from_checkpoint: Optional[str] = None
+    reset_scheduler_on_resume: bool = False
 
     # Logging
     logging_steps: int = 10
