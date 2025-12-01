@@ -297,7 +297,8 @@ class InternVLCollator:
             max_images_that_fit = max(1, available_for_images // self.tokens_per_image)
 
             # Use minimum of: loaded images, markers in text, images that fit
-            num_images = min(len(images), num_markers, max_images_that_fit)
+            # Ensure at least 1 image for video samples (handles missing markers edge case)
+            num_images = min(len(images), max(num_markers, 1), max_images_that_fit)
             batch_num_images.append(num_images)
 
             # Select images to use (first N frames)
