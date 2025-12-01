@@ -320,12 +320,21 @@ class InternVLCollator:
                 segments = kept_segments
 
             input_ids = []
-            for i, segment in enumerate(segments):
-                if i > 0 and i <= num_images:
-                    input_ids.extend([self.img_context_token_id] * self.tokens_per_image)
-                if segment:
-                    tokens = self.tokenizer.encode(segment, add_special_tokens=False)
-                    input_ids.extend(tokens)
+            
+            # Handle case where no <image> markers but we have images
+            # Prepend IMG_CONTEXT tokens before text
+            if num_markers == 0 and num_images > 0:
+                input_ids.extend([self.img_context_token_id] * self.tokens_per_image * num_images)
+                # Tokenize full text without splitting
+                tokens = self.tokenizer.encode(full_text, add_special_tokens=False)
+                input_ids.extend(tokens)
+            else:
+                for i, segment in enumerate(segments):
+                    if i > 0 and i <= num_images:
+                        input_ids.extend([self.img_context_token_id] * self.tokens_per_image)
+                    if segment:
+                        tokens = self.tokenizer.encode(segment, add_special_tokens=False)
+                        input_ids.extend(tokens)
 
             input_ids.append(self.tokenizer.eos_token_id)
 
@@ -338,13 +347,19 @@ class InternVLCollator:
                 prompt_segments = kept_segments
 
             prompt_len = 0
-            for i, segment in enumerate(prompt_segments):
-                if i > 0 and i <= num_images:
-                    prompt_len += self.tokens_per_image
-                if segment:
-                    prompt_len += len(
-                        self.tokenizer.encode(segment, add_special_tokens=False)
-                    )
+            
+            # Handle case where no <image> markers but we have images
+            if num_markers == 0 and num_images > 0:
+                prompt_len = self.tokens_per_image * num_images
+                prompt_len += len(self.tokenizer.encode(prompt, add_special_tokens=False))
+            else:
+                for i, segment in enumerate(prompt_segments):
+                    if i > 0 and i <= num_images:
+                        prompt_len += self.tokens_per_image
+                    if segment:
+                        prompt_len += len(
+                            self.tokenizer.encode(segment, add_special_tokens=False)
+                        )
 
             labels = [-100] * prompt_len + input_ids[prompt_len:]
 
