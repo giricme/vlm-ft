@@ -27,6 +27,9 @@ save_total_limit: 3
 # Example: experiments/robovqa_stage1_20241201_143000/checkpoints/best
 resume_from_checkpoint: experiments/robovqa_stage1_20251127_171615/checkpoints/final
 
+# Reset scheduler when loading Stage 1 checkpoint (fresh LR schedule for Stage 2)
+reset_scheduler_on_resume: true
+
 # Logging
 logging_steps: 1
 log_level: INFO

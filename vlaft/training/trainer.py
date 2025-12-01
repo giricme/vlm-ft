@@ -639,6 +639,9 @@ class VLATrainer:
         """
         checkpoint_dir = Path(checkpoint_path)
 
+        # Check if we should reset scheduler (for stage transitions)
+        reset_scheduler = getattr(self.config, "reset_scheduler_on_resume", False)
+
         # Load LoRA weights first (before optimizer, since optimizer references model params)
         adapter_path = checkpoint_dir / "adapter"
         if adapter_path.exists():
@@ -666,18 +669,31 @@ class VLATrainer:
         if state_path.exists():
             state = torch.load(state_path, map_location=self.device)
 
-            self.global_step = state["global_step"]
-            self.epoch = state["epoch"]
-            self.best_eval_loss = state["best_eval_loss"]
-            self.optimizer.load_state_dict(state["optimizer_state_dict"])
-            self.scheduler.load_state_dict(state["scheduler_state_dict"])
+            if reset_scheduler:
+                # Stage transition: load only weights, reset training state
+                # Keep global_step for logging continuity, but reset scheduler
+                self.global_step = state["global_step"]
+                self.epoch = 0  # Reset epoch for new stage
+                self.best_eval_loss = float("inf")  # Reset best loss for new stage
+                # Don't load optimizer/scheduler state - use fresh ones
+                logger.info(
+                    f"Loaded weights from checkpoint (step={self.global_step}), "
+                    f"reset scheduler for new stage (lr={self.config.optimizer.learning_rate})"
+                )
+            else:
+                # Normal resume: restore everything
+                self.global_step = state["global_step"]
+                self.epoch = state["epoch"]
+                self.best_eval_loss = state["best_eval_loss"]
+                self.optimizer.load_state_dict(state["optimizer_state_dict"])
+                self.scheduler.load_state_dict(state["scheduler_state_dict"])
 
-            if self.scaler is not None and "scaler_state_dict" in state:
-                self.scaler.load_state_dict(state["scaler_state_dict"])
+                if self.scaler is not None and "scaler_state_dict" in state:
+                    self.scaler.load_state_dict(state["scaler_state_dict"])
 
-            logger.info(
-                f"Resumed from checkpoint: step={self.global_step}, epoch={self.epoch}"
-            )
+                logger.info(
+                    f"Resumed from checkpoint: step={self.global_step}, epoch={self.epoch}"
+                )
 
     def _cleanup_checkpoints(self):
         """Remove old checkpoints beyond save_total_limit."""
