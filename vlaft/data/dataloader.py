@@ -178,14 +178,25 @@ class RoboVQADataset(Dataset):
             images.append(images[-1] if images else Image.new("RGB", (448, 448)))
 
         # Extract question/answer from conversations
+        # For multi-turn, concatenate all turns into a single conversation
         convs = sample["conversations"]
-        question = ""
+        
+        # Build full conversation: alternate human/gpt turns
+        question_parts = []
         answer = ""
-        for conv in convs:
+        
+        for i, conv in enumerate(convs):
             if conv["from"] == "human":
-                question = conv["value"]
+                question_parts.append(conv["value"])
             elif conv["from"] == "gpt":
-                answer = conv["value"]
+                # For all but last gpt turn, append to question context
+                # Last gpt turn becomes the answer to predict
+                if i < len(convs) - 1:
+                    question_parts.append(f"Assistant: {conv['value']}")
+                else:
+                    answer = conv["value"]
+        
+        question = "\n".join(question_parts)
 
         result = {
             "images": images,
