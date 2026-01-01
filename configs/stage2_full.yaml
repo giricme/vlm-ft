@@ -17,10 +17,10 @@ num_epochs: 1  # Single epoch to avoid overfitting
 max_steps: null
 
 # Evaluation and checkpointing
-eval_steps: 250
+eval_steps: 500
 eval_batch_size: 4
 eval_samples: 500
-save_steps: 500
+save_steps: 5000
 save_total_limit: 3
 
 # IMPORTANT: Set this to your Stage 1 checkpoint path
