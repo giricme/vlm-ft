@@ -1,0 +1,81 @@
+# Stage 2: Multi-turn Training
+# Reasoning chains with conversation context
+# Builds on Stage 1 - load checkpoint from stage1/best
+#
+# Hyperparameters aligned with InternVL2/3 official LoRA fine-tuning scripts
+# Stage 2 uses slightly lower LR since we're continuing from Stage 1
+
+experiment_name: robovqa_stage2_full
+output_dir: experiments
+seed: 42
+
+# Training parameters
+# Lower LR than Stage 1 for continued fine-tuning (2e-5 vs 4e-5)
+batch_size: 2  # Smaller for longer sequences
+gradient_accumulation_steps: 16  # Effective batch size: 32
+num_epochs: 1  # Single epoch to avoid overfitting
+max_steps: null
+
+# Evaluation and checkpointing
+eval_steps: 500
+eval_batch_size: 4
+eval_samples: 500
+save_steps: 5000
+save_total_limit: 3
+
+# IMPORTANT: Set this to your Stage 1 checkpoint path
+# Example: experiments/robovqa_stage1_20241201_143000/checkpoints/best
+resume_from_checkpoint: experiments/robovqa_stage1_full_20251206_221906/checkpoints/final
+
+# Reset scheduler when loading Stage 1 checkpoint (fresh LR schedule for Stage 2)
+reset_scheduler_on_resume: true
+
+# Logging
+logging_steps: 1
+log_level: INFO
+wandb_enabled: false
+wandb_project: vla-ft
+wandb_mode: offline
+
+# Data configuration
+data:
+  data_dir: data/robovqa/processed
+  images_subdir: images
+  stage: 2  # Multi-turn conversations
+  max_frames: 10
+  max_dynamic_patch: 1   # Force single tile per frame for memory
+  max_length: 4096       # Longer for multi-turn context
+  subset_ratio: 1.0
+  max_samples: null
+  num_workers: 4
+
+# Model configuration
+model:
+  model_name: InternVL3-8B
+  model_path: null
+  use_qlora: true
+  torch_dtype: bfloat16
+  attn_implementation: sdpa # flash_attention_2
+  gradient_checkpointing: true
+  
+  # Memory override for DGX Spark
+  max_memory_gb: 115
+  
+  # LoRA parameters (same as stage 1 for continuity)
+  lora_r: 128
+  lora_alpha: 256        # 2x r heuristic
+  lora_dropout: 0.05
+  lora_target_modules: null
+
+# Optimizer configuration
+optimizer:
+  optimizer: adamw
+  learning_rate: 2.0e-5  # Half of Stage 1 LR for continued fine-tuning
+  weight_decay: 0.01
+  warmup_ratio: 0.03
+  warmup_steps: null
+  lr_scheduler: cosine
+  max_grad_norm: 1.0
+  adam_beta1: 0.9
+  adam_beta2: 0.999      # Standard AdamW default
+  adam_epsilon: 1.0e-8
