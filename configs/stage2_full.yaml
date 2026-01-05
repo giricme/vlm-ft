@@ -18,7 +18,7 @@ max_steps: null
 
 # Evaluation and checkpointing
 eval_steps: 500
-eval_batch_size: 4
+eval_batch_size: 2
 eval_samples: 500
 save_steps: 5000
 save_total_limit: 3
