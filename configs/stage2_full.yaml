@@ -18,17 +18,18 @@ max_steps: null
 
 # Evaluation and checkpointing
 eval_steps: 500
-eval_batch_size: 4
+eval_batch_size: 2
 eval_samples: 500
-save_steps: 5000
+save_steps: 500
 save_total_limit: 3
 
 # IMPORTANT: Set this to your Stage 1 checkpoint path
 # Example: experiments/robovqa_stage1_20241201_143000/checkpoints/best
-resume_from_checkpoint: experiments/robovqa_stage1_full_20251206_221906/checkpoints/final
+# resume_from_checkpoint: experiments/robovqa_stage1_full_20251206_221906/checkpoints/final
+resume_from_checkpoint: experiments/robovqa_stage2_full_20260105_104831/checkpoints/step_25000
 
 # Reset scheduler when loading Stage 1 checkpoint (fresh LR schedule for Stage 2)
-reset_scheduler_on_resume: true
+reset_scheduler_on_resume: false
 
 # Logging
 logging_steps: 1
