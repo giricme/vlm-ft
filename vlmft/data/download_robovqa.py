@@ -4,8 +4,8 @@ Standalone script to download the RoboVQA dataset with parallel downloads
 and progress tracking.
 
 Usage:
-    python -m vlaft.data.download_robovqa --output /data/robovqa/raw
-    python -m vlaft.data.download_robovqa --output /data/robovqa/raw --workers 16
+    python -m vlmft.data.download_robovqa --output /data/robovqa/raw
+    python -m vlmft.data.download_robovqa --output /data/robovqa/raw --workers 16
 """
 
 import argparse

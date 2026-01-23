@@ -18,12 +18,12 @@ Output structure:
 
 Usage:
     # Preprocess
-    python -m vlaft.data.preprocess_robovqa --data-dir data/robovqa/raw --output-dir data/robovqa/processed
-    python -m vlaft.data.preprocess_robovqa --data-dir data/robovqa/raw --output-dir data/robovqa/processed --workers 8
+    python -m vlmft.data.preprocess_robovqa --data-dir data/robovqa/raw --output-dir data/robovqa/processed
+    python -m vlmft.data.preprocess_robovqa --data-dir data/robovqa/raw --output-dir data/robovqa/processed --workers 8
 
     # Verify preprocessed data
-    python -m vlaft.data.preprocess_robovqa --verify --output-dir data/robovqa/processed
-    python -m vlaft.data.preprocess_robovqa --verify --output-dir data/robovqa/processed --verify-samples 200
+    python -m vlmft.data.preprocess_robovqa --verify --output-dir data/robovqa/processed
+    python -m vlmft.data.preprocess_robovqa --verify --output-dir data/robovqa/processed --verify-samples 200
 """
 
 import argparse

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Training script for VLA fine-tuning on RoboVQA.
+Training script for VLM fine-tuning on RoboVQA.
 
 Usage:
     # Basic usage
@@ -27,17 +27,17 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from vlaft.models.internvl import estimate_memory_usage
-from vlaft.training.config import TrainingConfig, load_config
-from vlaft.training.trainer import VLATrainer
-from vlaft.common.logging_utils import CSVLogger, setup_logging
+from vlmft.models.internvl import estimate_memory_usage
+from vlmft.training.config import TrainingConfig, load_config
+from vlmft.training.trainer import VLMTrainer
+from vlmft.common.logging_utils import CSVLogger, setup_logging
 
 logger = logging.getLogger(__name__)
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Train VLA model on RoboVQA",
+        description="Train VLM model on RoboVQA",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -264,7 +264,7 @@ def main():
     )
 
     # Train
-    trainer = VLATrainer(config, exp_dir, csv_logger)
+    trainer = VLMTrainer(config, exp_dir, csv_logger)
     trainer.setup()
     trainer.train()
 

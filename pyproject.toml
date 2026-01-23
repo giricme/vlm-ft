@@ -3,16 +3,16 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "vlaft"
+name = "vlmft"
 version = "0.1.0"
-description = "VLA fine tuning framework"
+description = "VLM fine tuning framework"
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [
     {name = "Your Name", email = "your.email@example.com"}
 ]
-keywords = ["reinforcement-learning", "deep-learning", "lora", "vla", "finetune"]
+keywords = ["vision-language-model", "deep-learning", "lora", "vlm", "finetune", "robotics"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
@@ -48,12 +48,12 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/vla-ft"
-Repository = "https://github.com/yourusername/vla-ft"
+Homepage = "https://github.com/yourusername/vlm-ft"
+Repository = "https://github.com/yourusername/vlm-ft"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["vlaft*"]
+include = ["vlmft*"]
 
 [tool.black]
 line-length = 88
