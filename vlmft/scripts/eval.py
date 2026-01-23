@@ -3,13 +3,13 @@
 Evaluate a checkpoint on Stage 1 or Stage 2 validation data.
 
 Usage:
-    python -m vlaft.scripts.eval \
+    python -m vlmft.scripts.eval \
         --checkpoint experiments/robovqa_stage2_only_xxx/checkpoints/final \
         --stage 1 \
         --max_samples 500
 
     # Or with config overrides:
-    python -m vlaft.scripts.eval \
+    python -m vlmft.scripts.eval \
         --checkpoint experiments/robovqa_stage2_xxx/checkpoints/best \
         --stage 2 \
         --data.subset_ratio 1.0
@@ -101,7 +101,7 @@ def load_model_and_tokenizer(checkpoint_path: str, device: torch.device):
     from peft import set_peft_model_state_dict
     from safetensors.torch import load_file
 
-    from vlaft.models.internvl import load_internvl3
+    from vlmft.models.internvl import load_internvl3
 
     logger.info("Loading base model...")
     model, tokenizer = load_internvl3(
@@ -157,7 +157,7 @@ def create_eval_dataloader(
     max_length: int,
 ):
     """Create evaluation dataloader for specified stage."""
-    from vlaft.data.dataloader import load_stage_data
+    from vlmft.data.dataloader import load_stage_data
 
     logger.info(f"Loading Stage {stage} validation data...")
     dataloader = load_stage_data(

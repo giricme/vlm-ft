@@ -9,12 +9,12 @@ Comprehensive inspection of downloaded TFRecord files:
 
 Usage:
     # Full inspection
-    python -m vlaft.data.inspect_robovqa --data-dir /data/robovqa/raw
-    python -m vlaft.data.inspect_robovqa --data-dir /data/robovqa/raw --max-samples 1000
+    python -m vlmft.data.inspect_robovqa --data-dir /data/robovqa/raw
+    python -m vlmft.data.inspect_robovqa --data-dir /data/robovqa/raw --max-samples 1000
 
     # Sample mode: dump N random complete records
-    python -m vlaft.data.inspect_robovqa --data-dir /data/robovqa/raw --sample 12
-    python -m vlaft.data.inspect_robovqa --data-dir /data/robovqa/raw --sample 12 --seed 123
+    python -m vlmft.data.inspect_robovqa --data-dir /data/robovqa/raw --sample 12
+    python -m vlmft.data.inspect_robovqa --data-dir /data/robovqa/raw --sample 12 --seed 123
 """
 
 import argparse

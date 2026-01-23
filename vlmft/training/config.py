@@ -1,4 +1,4 @@
-"""Training configuration for VLA fine-tuning."""
+"""Training configuration for VLM fine-tuning."""
 
 from dataclasses import asdict, dataclass, field
 import logging
@@ -95,7 +95,7 @@ class TrainingConfig:
     logging_steps: int = 10
     log_level: str = "INFO"
     wandb_enabled: bool = False
-    wandb_project: str = "vla-ft"
+    wandb_project: str = "vlm-ft"
     wandb_mode: str = "offline"
 
     # Nested configs
@@ -228,7 +228,7 @@ save_total_limit: 3
 # Logging
 logging_steps: 10
 wandb_enabled: false
-wandb_project: vla-ft
+wandb_project: vlm-ft
 wandb_mode: offline
 
 # Data configuration
@@ -284,7 +284,7 @@ save_total_limit: 3
 # Logging
 logging_steps: 10
 wandb_enabled: false
-wandb_project: vla-ft
+wandb_project: vlm-ft
 wandb_mode: offline
 
 # Data configuration

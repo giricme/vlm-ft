@@ -1,4 +1,4 @@
-"""Trainer for VLA fine-tuning."""
+"""Trainer for VLM fine-tuning."""
 
 from datetime import datetime
 import logging
@@ -13,17 +13,17 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from tqdm import tqdm
 
-from vlaft.data.dataloader import load_stage_data
-from vlaft.models.internvl import load_internvl3, save_lora_weights
-from vlaft.training.config import TrainingConfig
-from vlaft.common.logging_utils import CSVLogger
+from vlmft.data.dataloader import load_stage_data
+from vlmft.models.internvl import load_internvl3, save_lora_weights
+from vlmft.training.config import TrainingConfig
+from vlmft.common.logging_utils import CSVLogger
 
 logger = logging.getLogger(__name__)
 
 
-class VLATrainer:
+class VLMTrainer:
     """
-    Trainer for VLA fine-tuning on RoboVQA.
+    Trainer for VLM fine-tuning on RoboVQA.
 
     Supports:
     - QLoRA training with gradient checkpointing

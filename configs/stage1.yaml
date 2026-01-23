@@ -33,7 +33,7 @@ resume_from_checkpoint: null
 logging_steps: 1
 log_level: INFO
 wandb_enabled: false
-wandb_project: vla-ft
+wandb_project: vlm-ft
 wandb_mode: offline
 
 # Data configuration

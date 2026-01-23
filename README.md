@@ -1,6 +1,6 @@
-# VLA Fine-Tuning: InternVL3-8B on RoboVQA
+# VLM Fine-Tuning: InternVL3-8B on RoboVQA
 
-Fine-tuning a Vision-Language-Action model for robotics scene understanding using curriculum learning on DGX Spark (GB10 Blackwell GPU, 128GB unified memory).
+Fine-tuning a Vision-Language Model for robotics scene understanding using curriculum learning on DGX Spark (GB10 Blackwell GPU, 128GB unified memory).
 
 ## Data Preprocessing
 
@@ -191,8 +191,8 @@ Use PyTorch's native SDPA (`attn_implementation: sdpa`) until official Blackwell
 ## Repository Structure
 
 ```
-vla-ft/
-├── vlaft/
+vlm-ft/
+├── vlmft/
 │   ├── data/
 │   │   ├── download_robovqa.py
 │   │   ├── inspect_robovqa.py
