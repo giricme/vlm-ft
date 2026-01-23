@@ -224,3 +224,7 @@ vlm-ft/
 - **GPU:** NVIDIA GB10 (Blackwell, sm_121)
 - **Memory:** 128GB unified memory
 - **CUDA:** 13.0
+
+## HUGGING FACE MODEL DOWNLOAD LINKS
+
+- Stage 1 (100% Data) - https://huggingface.co/agiri123/internvl3-8b-robovqa-stage1
