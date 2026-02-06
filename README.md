@@ -144,7 +144,59 @@ The full dataset delivered substantial gains over the 10% validation run, confir
 
 ### Stage 2: Multi-Turn Reasoning (100% Data)
 
-*In progress — estimated completion: ~17 days*
+| Metric | 10% Run | Full Run | Improvement |
+|--------|---------|----------|-------------|
+| Eval Loss | 0.034 | **0.012** | **65% better** |
+| Perplexity | 1.034 | **1.012** | |
+| Training Steps | 625 | 6,241 | |
+| Training Time | ~1.8 days | ~17 days | |
+
+**Training dynamics:**
+- Eval loss decreased from 0.013 → 0.012 over training
+- Step time: ~230s (2.5× longer than Stage 1 due to longer sequences)
+- GPU memory: 12.0 GB (stable with `max_memory_gb: 100`)
+- Multiple system crashes required checkpoint recovery (see Operational Lessons)
+
+### Final Model Performance
+
+| Stage | Eval Loss | Perplexity |
+|-------|-----------|------------|
+| Stage 1 (visual grounding) | 0.125 | 1.133 |
+| Stage 2 (multi-turn reasoning) | 0.012 | 1.012 |
+
+**Total training time:** ~43 days (including restarts from crashes)
+
+## Operational Lessons
+
+### Memory Management on Unified Memory Systems
+
+Stage 2 training experienced multiple system crashes due to GPU OOM on the DGX Spark's 128GB unified memory architecture. Key findings:
+
+**Root cause:** Stage 2 uses longer sequences (4096 vs 2048) and more frames (10 vs 4), causing occasional memory spikes that exceeded the configured limit.
+
+**Solution:** Reduced `max_memory_gb` from 115 to 100, providing ~28GB headroom instead of ~13GB. This prevented further OOM crashes.
+
+**Lesson:** Unified memory systems don't cleanly OOM — they thrash and hang. Leave substantial headroom (20%+) for variable-length sequence workloads.
+
+### Checkpoint Frequency
+
+Initial `save_steps: 5000` resulted in losing 2,186 steps (~6 days of work) after the first crash. Reduced to `save_steps: 500` (~1.3 days between checkpoints) for the remainder of training.
+
+**Recommendation:** For long-running jobs, calculate checkpoint frequency based on acceptable loss:
+- `save_steps = acceptable_hours_loss × 3600 / step_time`
+- For Stage 2 at 230s/step with 24-hour acceptable loss: `save_steps ≈ 375`
+
+### Eval Batch Size
+
+Evaluation with `eval_batch_size: 4` triggered OOM during Stage 2 due to memory spikes. Reduced to `eval_batch_size: 2` to match training batch size.
+
+### Crash Recovery Checklist
+
+When resuming from checkpoint after a crash:
+1. Update `resume_from_checkpoint` to the latest checkpoint path
+2. Set `reset_scheduler_on_resume: false` (only `true` when transitioning between stages)
+3. Verify logs show "Resumed from checkpoint: step=X" with correct step number
+4. Confirm loss matches expected value (not reset to ~1.0+)
 
 ## Flash Attention 2 on GB10 Blackwell
 
@@ -225,6 +277,9 @@ vlm-ft/
 - **Memory:** 128GB unified memory
 - **CUDA:** 13.0
 
-## HUGGING FACE MODEL DOWNLOAD LINKS
+## HuggingFace Model Downloads
 
-- Stage 1 (100% Data) - https://huggingface.co/agiri123/internvl3-8b-robovqa-stage1
+| Model | Link |
+|-------|------|
+| Stage 1 (Visual Grounding) | https://huggingface.co/agiri123/internvl3-8b-robovqa-stage1 |
+| Stage 2 (Multi-Turn Reasoning) | https://huggingface.co/agiri123/internvl3-8b-robovqa-stage2 |
